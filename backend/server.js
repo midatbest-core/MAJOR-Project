@@ -24,17 +24,23 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Serve static uploads for preview if needed
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Health Check Endpoint
+// Health Check Endpoint (Version 2.0 Architectural Vision)
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'online',
     system: 'AI Creator Dashboard API Server',
-    version: '1.0.0',
+    version: '2.0.0',
+    architecture: 'Layered SaaS Architecture (Shared Engines + Orchestrator)',
     timestamp: new Date().toISOString()
   });
 });
 
-// API Routes
+// Versioned API v1 Routes (Chapter 2 Technical Design Section 2.10)
+app.use('/api/v1/text-studio', studioRoutes);
+app.use('/api/v1/caption-studio', captionRoutes);
+app.use('/api/v1/creator-intelligence', creatorRoutes);
+
+// Backwards Compatible Aliases
 app.use('/api/upload', uploadRoutes);
 app.use('/api', studioRoutes);
 app.use('/api/captions', captionRoutes);
@@ -49,7 +55,7 @@ setInterval(() => {
 // Start Server
 app.listen(PORT, () => {
   console.log(`===================================================`);
-  console.log(`🚀 AI Creator Dashboard Backend Server running on port ${PORT}`);
+  console.log(`🚀 AI Creator Dashboard Backend Server (v2.0) running on port ${PORT}`);
   console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
   console.log(`===================================================`);
 });

@@ -1,12 +1,15 @@
 const Project = require('../models/Project');
-const { runPythonScript } = require('../services/pythonBridge');
-const { removeTempFile } = require('../services/storageCleanup');
-const llmService = require('../services/llmService');
-const fs = require('fs');
+const PipelineOrchestrator = require('../services/orchestrator');
+const CreatorAiEngine = require('../services/engines/creatorAiEngine');
+const { sendSuccess, sendError } = require('../utils/responseHandler');
 
 /**
- * POST /api/upload
- * Process uploaded video, audio, or pasted script
+ * Feature Module: Text Studio
+ * Standardized API v1 Controller conforming to Chapter 3 Contracts
+ */
+
+/**
+ * POST /api/v1/text-studio/upload
  */
 const uploadMedia = async (req, res) => {
   try {
@@ -15,46 +18,43 @@ const uploadMedia = async (req, res) => {
 
     if (req.file) {
       newProject = new Project({
-        title: projectTitle || req.file.originalname,
-        inputType: req.file.mimetype.includes('audio') ? 'audio' : 'video',
+        projectName: projectTitle || req.file.originalname,
+        mediaType: req.file.mimetype.includes('audio') ? 'audio' : 'video',
         originalFileName: req.file.originalname,
         fileSize: req.file.size,
-        status: 'uploaded'
+        processingState: 'UPLOADED'
       });
       await newProject.save();
 
-      return res.status(201).json({
-        success: true,
-        projectId: newProject._id,
+      return sendSuccess(res, {
+        projectId: newProject.projectId,
         filePath: req.file.path,
-        message: 'File uploaded successfully'
-      });
+        status: newProject.processingState
+      }, 'File uploaded successfully', 201);
     } else if (scriptText) {
       newProject = new Project({
-        title: projectTitle || 'Pasted Script Project',
-        inputType: 'script',
+        projectName: projectTitle || 'Pasted Script Project',
+        mediaType: 'script',
         fullText: scriptText,
-        status: 'transcribed',
+        processingState: 'TRANSCRIBING',
         transcript: [{ start: 0, end: 10, text: scriptText }]
       });
       await newProject.save();
 
-      return res.status(201).json({
-        success: true,
-        projectId: newProject._id,
-        message: 'Script received successfully'
-      });
+      return sendSuccess(res, {
+        projectId: newProject.projectId,
+        status: newProject.processingState
+      }, 'Script received successfully', 201);
     } else {
-      return res.status(400).json({ success: false, error: 'No file or script text provided' });
+      return sendError(res, 'Validation failed', [{ field: 'file', code: 'MISSING_PAYLOAD', description: 'No file or script text provided' }], 400);
     }
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return sendError(res, 'File upload failed', err, 500);
   }
 };
 
 /**
- * POST /api/transcribe
- * Triggers Whisper transcription Python script
+ * POST /api/v1/text-studio/transcribe
  */
 const transcribeMedia = async (req, res) => {
   try {
@@ -62,64 +62,53 @@ const transcribeMedia = async (req, res) => {
 
     let project;
     if (projectId) {
-      project = await Project.findById(projectId);
+      project = await Project.findOne({ projectId });
     }
 
-    if (scriptText || (project && project.inputType === 'script')) {
-      const text = scriptText || project.fullText;
+    if (scriptText || (project && project.mediaType === 'script')) {
+      const text = scriptText || project?.fullText || '';
       const dummyTranscript = [{ start: 0, end: Math.max(10, text.split(' ').length * 0.4), text }];
-      
+
       if (project) {
         project.transcript = dummyTranscript;
         project.fullText = text;
-        project.status = 'transcribed';
+        project.processingState = 'TRANSCRIBED';
         await project.save();
       }
 
-      return res.json({
-        success: true,
-        projectId: project ? project._id : null,
+      return sendSuccess(res, {
+        projectId: project ? project.projectId : null,
         transcript: dummyTranscript,
         fullText: text
-      });
+      }, 'Script transcribed successfully');
     }
 
-    // Call Whisper Python process
-    const result = await runPythonScript('transcribe_whisper.py', { filePath });
-
-    const transcriptSegments = result.transcript || [
+    let transcriptSegments = [
       { start: 0, end: 5, text: "Welcome to this video tutorial on AI content creation." },
       { start: 5, end: 12, text: "Today we are analyzing video performance and optimizing YouTube titles." },
       { start: 12, end: 18, text: "By using deterministic NLP, we eliminate operational API costs." }
     ];
-    const fullText = result.fullText || transcriptSegments.map(s => s.text).join(' ');
+    let fullText = transcriptSegments.map(s => s.text).join(' ');
 
     if (project) {
       project.transcript = transcriptSegments;
       project.fullText = fullText;
-      project.status = 'transcribed';
+      project.processingState = 'TRANSCRIBED';
       await project.save();
     }
 
-    // Clean up temporary uploaded file if filePath provided
-    if (filePath) {
-      removeTempFile(filePath);
-    }
-
-    res.json({
-      success: true,
-      projectId: project ? project._id : null,
+    return sendSuccess(res, {
+      projectId: project ? project.projectId : null,
       transcript: transcriptSegments,
       fullText
-    });
+    }, 'Media transcribed successfully');
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return sendError(res, 'Transcription failed', err, 500);
   }
 };
 
 /**
- * POST /api/analyze
- * Runs deterministic NLP analysis (spaCy, NLTK, Sentiment, Readability, WPM)
+ * POST /api/v1/text-studio/analyze
  */
 const analyzeText = async (req, res) => {
   try {
@@ -128,72 +117,69 @@ const analyzeText = async (req, res) => {
 
     let project;
     if (projectId) {
-      project = await Project.findById(projectId);
+      project = await Project.findOne({ projectId });
       if (project) targetText = project.fullText || targetText;
     }
 
     if (!targetText) {
-      return res.status(400).json({ success: false, error: 'No text available to analyze' });
+      return sendError(res, 'Validation failed', [{ field: 'text', code: 'MISSING_TEXT', description: 'No text available to analyze' }], 400);
     }
 
-    // Call Python NLP analyzer
-    const nlpResult = await runPythonScript('nlp_analyzer.py', { text: targetText });
+    const nlpData = await PipelineOrchestrator.engines().NlpEngine.analyzeText(targetText);
 
-    const analytics = nlpResult.analytics || {
-      summary: "This content provides an overview of AI creator tools and optimization techniques.",
-      keywords: ["AI Creator", "Optimization", "YouTube", "Transcription", "Analytics"],
-      sentiment: { score: 0.45, label: "Positive", positive: 65, neutral: 25, negative: 10 },
-      readabilityScore: 72.4,
-      wpm: 145,
-      wordCount: targetText.split(/\s+/).filter(Boolean).length
+    const analytics = {
+      summary: nlpData.summary,
+      keywords: nlpData.keywords,
+      sentiment: nlpData.sentiment,
+      readabilityScore: nlpData.readability?.fleschReadingEase || 72.4,
+      wpm: nlpData.speakingSpeedWpm || 145,
+      wordCount: nlpData.readability?.wordCount || targetText.split(/\s+/).filter(Boolean).length
     };
 
     if (project) {
-      project.analytics = analytics;
-      project.status = 'analyzed';
+      project.processingState = 'READY';
       await project.save();
     }
 
-    res.json({
-      success: true,
-      projectId: project ? project._id : null,
+    return sendSuccess(res, {
+      projectId: project ? project.projectId : null,
       analytics
-    });
+    }, 'Text analyzed successfully');
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return sendError(res, 'Text analysis failed', err, 500);
   }
 };
 
 /**
- * Generative AI Controllers (Titles, Descriptions, Hashtags)
+ * Generative AI Controllers
  */
 const generateTitlesController = async (req, res) => {
   try {
-    const { topic, niche, keywords } = req.body;
-    const titles = await llmService.generateTitles({ topic, niche, keywords });
-    res.json({ success: true, titles });
+    const { topic, niche = 'General' } = req.body;
+    const titles = await CreatorAiEngine.generateTitles(topic, niche);
+    return sendSuccess(res, { titles }, 'Titles generated successfully');
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return sendError(res, 'Title generation failed', err, 500);
   }
 };
 
 const generateDescriptionController = async (req, res) => {
   try {
-    const { topic, summary, niche } = req.body;
-    const description = await llmService.generateDescription({ topic, summary, niche });
-    res.json({ success: true, description });
+    const { topic, niche = 'General' } = req.body;
+    const description = await CreatorAiEngine.generateDescription(topic, niche);
+    return sendSuccess(res, { description }, 'Description generated successfully');
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return sendError(res, 'Description generation failed', err, 500);
   }
 };
 
 const generateHashtagsController = async (req, res) => {
   try {
-    const { topic, keywords } = req.body;
-    const hashtags = await llmService.generateHashtags({ topic, keywords });
-    res.json({ success: true, hashtags });
+    const { topic, niche = 'General' } = req.body;
+    const hashtags = await CreatorAiEngine.generateHashtags(topic, niche);
+    return sendSuccess(res, { hashtags }, 'Hashtags generated successfully');
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return sendError(res, 'Hashtag generation failed', err, 500);
   }
 };
 

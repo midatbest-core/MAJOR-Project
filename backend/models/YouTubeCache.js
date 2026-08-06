@@ -1,11 +1,12 @@
 const mongoose = require('mongoose');
 
-const YouTubeCacheSchema = new mongoose.Schema({
+const YouTubeAnalysisSchema = new mongoose.Schema({
   videoId: { type: String, required: true, unique: true, index: true },
+  channel: { type: String },
   url: { type: String, required: true },
   niche: { type: String },
   topic: { type: String },
-  
+
   metrics: {
     title: String,
     channel: String,
@@ -18,7 +19,7 @@ const YouTubeCacheSchema = new mongoose.Schema({
     likeViewRatio: Number,
     commentViewRatio: Number
   },
-  
+
   audienceIntelligence: {
     commentSentiment: {
       positive: Number,
@@ -30,7 +31,15 @@ const YouTubeCacheSchema = new mongoose.Schema({
     frequentlyRequested: [String],
     trendingTopics: [String]
   },
-  
+
+  successPatterns: {
+    hookQuality: { score: Number, rating: String, recommendation: String },
+    storytelling: { score: Number, rating: String, recommendation: String },
+    pacing: { score: Number, rating: String, recommendation: String },
+    keywordRichness: { score: Number, rating: String, recommendation: String },
+    audienceEngagement: { score: Number, rating: String, recommendation: String }
+  },
+
   inspiration: {
     videoIdeas: [String],
     hookIdeas: [String],
@@ -43,7 +52,9 @@ const YouTubeCacheSchema = new mongoose.Schema({
       cta: String
     },
     creatorRecommendations: [String]
-  }
-}, { timestamps: true });
+  },
 
-module.exports = mongoose.model('YouTubeCache', YouTubeCacheSchema);
+  schemaVersion: { type: String, default: '1.0.0' }
+}, { timestamps: true, collection: 'youtube_analysis' });
+
+module.exports = mongoose.model('YouTubeCache', YouTubeAnalysisSchema);
