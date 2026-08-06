@@ -1,35 +1,77 @@
 const axios = require('axios');
 
 /**
- * Service orchestrator for Generative AI tasks (Titles, Descriptions, Hashtags, Hooks).
- * Uses Google Gemini API (or configurable LLM) with zero-cost deterministic fallback.
+ * Service orchestrator for Generative AI tasks using Gemini API or dynamic NLP.
  */
 
-const generateTitles = async ({ topic, niche, keywords = [] }) => {
+const generateLLMText = async (prompt, format = 'text') => {
   const apiKey = process.env.GEMINI_API_KEY;
-  const kwString = keywords.length > 0 ? keywords.join(', ') : topic;
+  if (!apiKey) return null;
 
-  if (apiKey) {
+  const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+
+  for (const model of models) {
     try {
       const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
           contents: [{
-            parts: [{
-              text: `Generate 5 viral, high-CTR YouTube title suggestions for a video in the "${niche || 'General'}" niche about "${topic}". Keywords: ${kwString}. Output only a raw JSON array of string titles.`
-            }]
+            parts: [{ text: prompt }]
           }]
-        }
+        },
+        { timeout: 10000 }
       );
-      const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const match = text.match(/\[[\s\S]*\]/);
-      if (match) return JSON.parse(match[0]);
+
+      const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) continue;
+
+      if (format === 'json') {
+        const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (match) return JSON.parse(match[0]);
+      }
+      return text;
     } catch (err) {
-      console.warn('[LLM Service] Gemini API call failed, falling back to rule-based titles:', err.message);
+      console.warn(`[LLM Service] Gemini ${model} error: ${err.message}`);
     }
   }
+  return null;
+};
 
-  // Fallback high-converting YouTube Title Templates
+const analyzeAudienceComments = async ({ title, comments = [], niche, topic }) => {
+  const commentText = comments.length > 0 ? comments.slice(0, 15).join('\n') : `Video title: ${title}`;
+  
+  const prompt = `You are an AI Audience Intelligence Analyst for YouTube videos.
+Video Title: "${title}"
+Niche: "${niche}"
+Topic: "${topic}"
+
+Comments Sample:
+${commentText}
+
+Analyze this video's audience reaction and return a strict JSON object with these exact keys:
+{
+  "commentSentiment": { "positive": 75, "neutral": 15, "negative": 10 },
+  "lovedAspects": ["Aspect 1", "Aspect 2", "Aspect 3"],
+  "dislikedAspects": ["Critique 1", "Critique 2"],
+  "frequentlyRequested": ["Request 1", "Request 2", "Request 3"],
+  "trendingTopics": ["Topic 1", "Topic 2", "Topic 3", "Topic 4", "Topic 5"]
+}
+Make positive + neutral + negative sum to 100%. Make lovedAspects, dislikedAspects, frequentlyRequested, and trendingTopics specific to "${title}" and the comments.`;
+
+  const aiResult = await generateLLMText(prompt, 'json');
+  if (aiResult && aiResult.commentSentiment && aiResult.lovedAspects) {
+    return aiResult;
+  }
+  return null;
+};
+
+const generateTitles = async ({ topic, niche, keywords = [] }) => {
+  const kwString = keywords.length > 0 ? keywords.join(', ') : topic;
+  const prompt = `Generate 5 viral, high-CTR YouTube title suggestions for a video in the "${niche || 'General'}" niche about "${topic}". Keywords: ${kwString}. Output only a raw JSON array of string titles.`;
+  
+  const res = await generateLLMText(prompt, 'json');
+  if (Array.isArray(res)) return res;
+
   return [
     `How to Master ${topic} in 2026 (Step-by-Step Guide)`,
     `The Secret to ${topic} Nobody Talks About`,
@@ -40,27 +82,10 @@ const generateTitles = async ({ topic, niche, keywords = [] }) => {
 };
 
 const generateDescription = async ({ topic, summary = '', niche }) => {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const prompt = `Write an SEO-optimized YouTube description for a video about "${topic}". Context summary: "${summary}". Include timestamps placeholder, call to action, and relevant hashtags.`;
+  const res = await generateLLMText(prompt, 'text');
+  if (res) return res;
 
-  if (apiKey) {
-    try {
-      const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-        {
-          contents: [{
-            parts: [{
-              text: `Write an SEO-optimized YouTube description for a video about "${topic}". Context summary: "${summary}". Include timestamps placeholder, call to action, and relevant hashtags.`
-            }]
-          }]
-        }
-      );
-      return response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    } catch (err) {
-      console.warn('[LLM Service] Gemini API call failed for description fallback:', err.message);
-    }
-  }
-
-  // Fallback description template
   return `📌 In this video, we dive deep into ${topic}.\n\n${summary ? 'Summary: ' + summary + '\n\n' : ''}⏱️ Timestamps:\n00:00 - Introduction\n01:30 - Core Concept & Breakdown\n05:00 - Step-by-Step Demonstration\n08:30 - Key Takeaways & Conclusion\n\n🔔 Don't forget to Like, Subscribe, and leave your thoughts in the comments below!`;
 };
 
@@ -79,6 +104,8 @@ const generateHashtags = async ({ topic, keywords = [] }) => {
 };
 
 module.exports = {
+  generateLLMText,
+  analyzeAudienceComments,
   generateTitles,
   generateDescription,
   generateHashtags

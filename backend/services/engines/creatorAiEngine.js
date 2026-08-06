@@ -2,7 +2,7 @@ const { generateLLMText } = require('../llmService');
 
 /**
  * Creator AI Engine
- * Enforces Shared AI Request Contract (Section 3.9) and AI Response Contract (Section 3.10).
+ * Responsibilities: Generates dynamic Titles, Hooks, Descriptions, Hashtags, Video Ideas, SEO Suggestions, Content Blueprints
  */
 class CreatorAiEngine {
   /**
@@ -97,7 +97,53 @@ Respond strictly in valid JSON format.`;
     return res.outputs;
   }
 
+  /**
+   * Generates dynamic Personalized Inspiration & 5-Stage Blueprint using Gemini LLM
+   */
   static async generateInspiration(youtubeUrl, niche = 'Programming', topic = 'Machine Learning Roadmap') {
+    const prompt = `Act as an elite YouTube Content Strategist & Growth Engine.
+Reference Video URL: "${youtubeUrl}"
+Creator Niche: "${niche}"
+Target Topic: "${topic}"
+
+Generate personalized inspiration for a creator in the "${niche}" niche making a video about "${topic}".
+Return a strict JSON object with this exact schema:
+{
+  "videoIdeas": [
+    "Original Concept 1 tailored to ${topic}",
+    "Original Concept 2 tailored to ${topic}",
+    "Original Concept 3 tailored to ${topic}"
+  ],
+  "hookIdeas": [
+    "Opening line 1 for ${topic}",
+    "Opening line 2 for ${topic}",
+    "Opening line 3 for ${topic}"
+  ],
+  "titleSuggestions": [
+    "SEO Title 1",
+    "SEO Title 2",
+    "SEO Title 3"
+  ],
+  "blueprint": {
+    "hook": "Specific 0-10s hook instructions for ${topic}",
+    "problem": "Clear problem statement framing for ${topic}",
+    "solution": "Core solution presentation strategy for ${topic}",
+    "demo": "Interactive live demo / proof points strategy for ${topic}",
+    "cta": "Compelling call to action strategy"
+  },
+  "creatorRecommendations": [
+    "Recommendation 1 specific to ${niche} creators",
+    "Recommendation 2 specific to retention curve",
+    "Recommendation 3 specific to call-to-action placement"
+  ]
+}`;
+
+    const aiRes = await generateLLMText(prompt, 'json');
+    if (aiRes && aiRes.videoIdeas && aiRes.blueprint) {
+      return aiRes;
+    }
+
+    // High-value fallback if LLM is unavailable
     return {
       videoIdeas: [
         `Building a ${topic} from Scratch in 2026`,
