@@ -1,0 +1,4 @@
+{"level":"info","message":"===================================================","service":"ai-creator-dashboard-backend","timestamp":"2026-08-07 01:36:37"}
+{"level":"info","message":"🚀 AI Creator Dashboard Backend running on port 5000","service":"ai-creator-dashboard-backend","timestamp":"2026-08-07 01:36:37"}
+{"level":"info","message":"📡 Health Check: http://localhost:5000/api/health","service":"ai-creator-dashboard-backend","timestamp":"2026-08-07 01:36:37"}
+{"level":"info","message":"===================================================","service":"ai-creator-dashboard-backend","timestamp":"2026-08-07 01:36:37"}
