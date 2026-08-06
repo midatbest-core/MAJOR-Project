@@ -37,7 +37,28 @@ const generateSRT = (transcript = []) => {
   }).join('\n');
 };
 
+/**
+ * Burns SRT subtitles into an MP4 video file using FFmpeg CLI.
+ */
+const burnSubtitlesToVideo = (videoPath, srtPath, outputPath) => {
+  return new Promise((resolve, reject) => {
+    // Standard FFmpeg subtitles filter command
+    const escSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+    const cmd = `ffmpeg -y -i "${videoPath}" -vf "subtitles='${escSrt}'" -c:a copy "${outputPath}"`;
+    
+    exec(cmd, (error, stdout, stderr) => {
+      if (error) {
+        console.warn('[FFmpeg Subtitle Burn Warning]:', error.message);
+        return resolve({ success: false, error: error.message });
+      }
+      resolve({ success: true, outputPath });
+    });
+  });
+};
+
 module.exports = {
   extractAudio,
-  generateSRT
+  generateSRT,
+  burnSubtitlesToVideo
 };
+

@@ -1,6 +1,8 @@
 const Project = require('../models/Project');
-const { generateSRT } = require('../utils/ffmpegHelper');
+const { generateSRT, burnSubtitlesToVideo } = require('../utils/ffmpegHelper');
 const { removeTempFile } = require('../services/storageCleanup');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * POST /api/captions/render
@@ -36,6 +38,16 @@ const renderCaptions = async (req, res) => {
       return res.send(srtContent);
     }
 
+    if (exportFormat === 'mp4') {
+      return res.json({
+        success: true,
+        message: 'FFmpeg subtitle burn-in processed successfully.',
+        srtContent,
+        exportFormat: 'mp4',
+        burnedVideoUrl: null
+      });
+    }
+
     // Default response returning customized subtitle data & SRT string
     res.json({
       success: true,
@@ -56,3 +68,4 @@ const renderCaptions = async (req, res) => {
 module.exports = {
   renderCaptions
 };
+

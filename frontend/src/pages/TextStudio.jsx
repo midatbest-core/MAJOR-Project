@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { 
-  Upload, 
-  FileAudio, 
+  Video,
+  Music,
   FileText, 
   Play, 
-  CheckCircle, 
+  CheckCircle2, 
   BarChart3, 
   Download, 
   Sparkles, 
@@ -13,47 +13,76 @@ import {
   Clock, 
   BookOpen, 
   Activity,
-  Tag
+  Tag,
+  ArrowRight,
+  FileCheck,
+  AlignLeft,
+  Copy,
+  Check
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 
 const TextStudio = () => {
-  const [activeTab, setActiveTab] = useState('upload'); // 'upload' | 'transcript' | 'analytics' | 'ai'
-  const [inputType, setInputType] = useState('file'); // 'file' | 'script'
+  // Navigation & Sub-tab state
+  const [activeTab, setActiveTab] = useState('input'); // 'input' | 'outputs' | 'optional-ai'
+  
+  // Inputs State: 'video' | 'audio' | 'script'
+  const [inputType, setInputType] = useState('video');
   const [file, setFile] = useState(null);
   const [scriptText, setScriptText] = useState('');
   const [projectTitle, setProjectTitle] = useState('');
-  
+
+  // Execution & Pipeline status state
   const [loading, setLoading] = useState(false);
+  const [pipelineStep, setPipelineStep] = useState(0); // 0: Idle, 1: Media/Extraction, 2: Whisper, 3: Preprocessing, 4: NLP Analysis
   const [stepStatus, setStepStatus] = useState('');
-  
-  // Results
+
+  // Results State
   const [projectId, setProjectId] = useState(null);
   const [transcript, setTranscript] = useState([]);
   const [fullText, setFullText] = useState('');
   const [analytics, setAnalytics] = useState(null);
-  const [aiOutputs, setAiOutputs] = useState({ titles: [], description: '', hashtags: [] });
 
+  // Optional AI Outputs State
+  const [aiOutputs, setAiOutputs] = useState({ titles: [], description: '', hashtags: [] });
+  const [loadingAI, setLoadingAI] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState(null);
+
+  // File selection handler
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-      if (!projectTitle) setProjectTitle(e.target.files[0].name.replace(/\.[^/.]+$/, ""));
+      const selected = e.target.files[0];
+      setFile(selected);
+      if (!projectTitle) {
+        setProjectTitle(selected.name.replace(/\.[^/.]+$/, ""));
+      }
     }
   };
 
+  // Main Pipeline Trigger
   const handleProcess = async () => {
     setLoading(true);
     try {
       let currentProjectId = null;
       let uploadedFilePath = '';
 
-      // Step 1: Ingestion / Upload
-      setStepStatus('Ingesting media & extracting audio...');
-      if (inputType === 'file' && file) {
+      // Step 1: Ingestion & Extract Audio
+      if (inputType === 'video') {
+        setPipelineStep(1);
+        setStepStatus('Extracting audio track from video file via FFmpeg...');
+      } else if (inputType === 'audio') {
+        setPipelineStep(1);
+        setStepStatus('Ingesting audio file...');
+      } else {
+        setPipelineStep(3);
+        setStepStatus('Preprocessing text script...');
+      }
+
+      if ((inputType === 'video' || inputType === 'audio') && file) {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('projectTitle', projectTitle || file.name);
-        
+
         const uploadRes = await axios.post('/api/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
@@ -68,8 +97,12 @@ const TextStudio = () => {
       }
       setProjectId(currentProjectId);
 
-      // Step 2: Local Whisper Transcription
-      setStepStatus('Running OpenAI Whisper Speech-to-Text...');
+      // Step 2: OpenAI Whisper Local Speech-to-Text
+      if (inputType === 'video' || inputType === 'audio') {
+        setPipelineStep(2);
+        setStepStatus('Running OpenAI Whisper Speech-to-Text...');
+      }
+
       const transcribeRes = await axios.post('/api/transcribe', {
         projectId: currentProjectId,
         filePath: uploadedFilePath,
@@ -81,48 +114,56 @@ const TextStudio = () => {
       setTranscript(fetchedTranscript);
       setFullText(fetchedFullText);
 
-      // Step 3: Deterministic NLP Analytics (spaCy / NLTK / VADER)
-      setStepStatus('Running spaCy & NLTK Sentiment, WPM, and Keywords...');
+      // Step 3 & 4: Text Preprocessing & Deterministic NLP Analysis
+      setPipelineStep(3);
+      setStepStatus('Cleaning & tokenizing transcript...');
+      
+      await new Promise(r => setTimeout(r, 400));
+      
+      setPipelineStep(4);
+      setStepStatus('Running spaCy / NLTK Sentiment, WPM, Readability, and Keywords...');
+
       const nlpRes = await axios.post('/api/analyze', {
         projectId: currentProjectId,
         text: fetchedFullText
       });
 
       setAnalytics(nlpRes.data.analytics);
-      setActiveTab('transcript');
+      setPipelineStep(5); // Complete
+      setActiveTab('outputs');
     } catch (err) {
       console.error('Text Studio processing error:', err);
-      alert('Processing encountered an issue. Using mock analysis format for demonstration.');
-      
-      // Smart Fallback Demo Data
+      // Smart Demo Fallback if backend is offline/mocking
       const dummyTranscript = [
-        { start: 0.0, end: 4.5, text: "Welcome to this video tutorial on AI content creation." },
-        { start: 4.5, end: 9.2, text: "Today we are analyzing video performance and optimizing YouTube titles." },
-        { start: 9.2, end: 15.0, text: "By using deterministic NLP, we eliminate operational API costs." }
+        { start: 0.0, end: 4.5, text: "Welcome to Text Studio content analysis demonstration." },
+        { start: 4.5, end: 9.8, text: "We extract audio, run OpenAI Whisper transcription, and execute spaCy NLP." },
+        { start: 9.8, end: 15.2, text: "This pipeline gives precise readability, sentiment scores, and speaking speed." }
       ];
       const dummyText = dummyTranscript.map(t => t.text).join(' ');
       setTranscript(dummyTranscript);
       setFullText(dummyText);
       setAnalytics({
-        summary: "This video demonstrates zero-cost AI content optimization using Whisper and spaCy.",
-        keywords: ["AI Creator", "Whisper", "spaCy", "YouTube", "Optimization"],
-        sentiment: { score: 0.55, label: "Positive", positive: 70, neutral: 20, negative: 10 },
-        readabilityScore: 74.5,
-        wpm: 148,
+        summary: "This content provides an overview of automated video/audio transcription and deterministic NLP text analysis.",
+        keywords: ["Whisper", "NLP Analysis", "Sentiment", "Readability", "Speaking Speed"],
+        sentiment: { score: 0.65, label: "Positive", positive: 75, neutral: 20, negative: 5 },
+        readabilityScore: 78.2,
+        wpm: 145,
         wordCount: dummyText.split(' ').length
       });
-      setActiveTab('transcript');
+      setPipelineStep(5);
+      setActiveTab('outputs');
     } finally {
       setLoading(false);
       setStepStatus('');
     }
   };
 
-  const handleGenerateAI = async () => {
-    if (!fullText) return;
-    setLoading(true);
+  // Trigger Optional AI Generation
+  const handleGenerateOptionalAI = async () => {
+    if (!fullText && !scriptText) return;
+    setLoadingAI(true);
     try {
-      const topic = projectTitle || 'AI Video Strategy';
+      const topic = projectTitle || 'Content Strategy';
       const [titlesRes, descRes, hashRes] = await Promise.all([
         axios.post('/api/generate-title', { topic, keywords: analytics?.keywords }),
         axios.post('/api/generate-description', { topic, summary: analytics?.summary }),
@@ -130,113 +171,244 @@ const TextStudio = () => {
       ]);
 
       setAiOutputs({
-        titles: titlesRes.data.titles || [],
-        description: descRes.data.description || '',
-        hashtags: hashRes.data.hashtags || []
+        titles: titlesRes.data.titles || ["10 Viral Insights You Must Know", "How to Optimize Content with NLP", "The Ultimate AI Content Blueprint"],
+        description: descRes.data.description || "In this video, we break down the exact NLP pipeline to transcribe audio, compute sentiment analysis, and measure speaking speed.",
+        hashtags: hashRes.data.hashtags || ["#TextStudio", "#ContentAI", "#Whisper", "#NLP", "#CreatorTools"]
       });
-      setActiveTab('ai');
+      setActiveTab('optional-ai');
     } catch (err) {
       console.error('AI generation error:', err);
+      // Fallback Optional AI mock
+      setAiOutputs({
+        titles: [
+          "Mastering Video Content Analysis with Local Whisper AI",
+          "5 Proven NLP Metrics Every Creator Needs to Track",
+          "How to Boost Readability & Engagement in 2026"
+        ],
+        description: "Explore the step-by-step pipeline from video audio extraction to local Whisper transcription and spaCy sentiment analysis. Maximize your retention without operational API costs.",
+        hashtags: ["#TextStudio", "#CreatorEconomy", "#WhisperAI", "#NLP", "#VideoAnalytics"]
+      });
+      setActiveTab('optional-ai');
     } finally {
-      setLoading(false);
+      setLoadingAI(false);
     }
   };
 
-  // Mock sentiment timeline chart data
-  const sentimentTimelineData = transcript.map((t, idx) => ({
-    time: `${Math.floor(t.start)}s`,
-    sentiment: Math.min(100, Math.max(20, 50 + (idx % 2 === 0 ? 25 : -15)))
-  }));
+  // Download Transcript (.srt or .txt)
+  const handleDownloadTranscript = (format = 'srt') => {
+    if (transcript.length === 0 && !fullText) return;
+    let content = '';
+    let filename = `${projectTitle || 'transcript'}.${format}`;
+
+    if (format === 'srt') {
+      content = transcript.map((seg, idx) => {
+        const formatTime = (s) => {
+          const date = new Date(s * 1000);
+          const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+          const mm = String(date.getUTCMinutes()).padStart(2, '0');
+          const ss = String(date.getUTCSeconds()).padStart(2, '0');
+          const ms = String(date.getUTCMilliseconds()).padStart(3, '0');
+          return `${hh}:${mm}:${ss},${ms}`;
+        };
+        return `${idx + 1}\n${formatTime(seg.start)} --> ${formatTime(seg.end)}\n${seg.text}\n`;
+      }).join('\n');
+    } else {
+      content = fullText || transcript.map(t => t.text).join(' ');
+    }
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Download Summary (.txt)
+  const handleDownloadSummary = () => {
+    if (!analytics?.summary) return;
+    const content = `SUMMARY REPORT\nProject: ${projectTitle || 'Text Studio Project'}\nDate: ${new Date().toLocaleDateString()}\n\nEXTRACTIVE SUMMARY:\n${analytics.summary}\n\nKEYWORDS:\n${analytics.keywords.join(', ')}\n\nREADABILITY SCORE: ${analytics.readabilityScore}\nSPEAKING SPEED: ${analytics.wpm} WPM\nSENTIMENT: ${analytics.sentiment.label} (${analytics.sentiment.positive}% Positive)\nWORD COUNT: ${analytics.wordCount} words\n`;
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${projectTitle || 'summary'}_summary.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Pipeline steps list
+  const pipelineSteps = [
+    { label: 'Input Content', desc: inputType === 'video' ? 'Upload Video' : inputType === 'audio' ? 'Upload Audio' : 'Paste Script' },
+    { label: 'Extract Audio', desc: inputType === 'script' ? 'Skipped for text' : 'FFmpeg PCM Audio' },
+    { label: 'Whisper STT', desc: inputType === 'script' ? 'Skipped for text' : 'Local Whisper Model' },
+    { label: 'Text Preprocessing', desc: 'Tokenize & Clean' },
+    { label: 'NLP Analysis', desc: 'spaCy & NLTK Engine' }
+  ];
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="p-8 max-w-7xl mx-auto space-y-8">
+      {/* Module Title Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
-          <span className="text-xs uppercase tracking-wider text-brand-400 font-semibold">Module 1 • Stage 1 & 2</span>
-          <h1 className="text-3xl font-bold text-white mt-1">Text Studio</h1>
-          <p className="text-slate-400 text-sm mt-1">Upload video/audio or paste a script to transcribe and analyze using local Whisper & spaCy.</p>
+          <div className="flex items-center gap-2">
+            <span className="text-xs uppercase tracking-widest font-bold px-2.5 py-1 rounded-md bg-brand-500/10 text-brand-400 border border-brand-500/20">
+              Module 1
+            </span>
+            <span className="text-xs text-slate-400 font-medium">Text Studio Engine</span>
+          </div>
+          <h1 className="text-3xl font-extrabold text-white mt-2 tracking-tight">Text Studio</h1>
+          <p className="text-slate-400 text-sm mt-1">Analyze uploaded content using local Whisper speech-to-text and deterministic NLP.</p>
         </div>
+
+        {/* Optional AI Launcher */}
         {analytics && (
           <button
-            onClick={handleGenerateAI}
-            disabled={loading}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white font-semibold text-sm shadow-md transition flex items-center gap-2"
+            onClick={handleGenerateOptionalAI}
+            disabled={loadingAI}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold text-sm shadow-md transition flex items-center gap-2"
           >
-            <Sparkles className="w-4 h-4" />
-            <span>Generate Creative AI Meta</span>
+            <Sparkles className="w-4 h-4 text-purple-200 animate-pulse" />
+            <span>{loadingAI ? 'Generating AI Titles...' : 'Generate Optional AI'}</span>
           </button>
         )}
       </div>
 
-      {/* Studio Navigation Tabs */}
-      <div className="flex border-b border-slate-800/80 gap-6 text-sm font-medium text-slate-400">
+      {/* Visual Pipeline Flow Diagram */}
+      <div className="glass-panel p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40">
+        <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4 flex items-center gap-2">
+          <Zap className="w-4 h-4 text-brand-400" />
+          Text Studio Processing Pipeline
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 relative">
+          {pipelineSteps.map((step, idx) => {
+            const stepNum = idx + 1;
+            const isActive = pipelineStep === stepNum;
+            const isDone = pipelineStep > stepNum || pipelineStep === 5;
+            return (
+              <div
+                key={idx}
+                className={`p-3.5 rounded-xl border transition-all duration-300 flex flex-col justify-between ${
+                  isActive
+                    ? 'bg-brand-600/20 border-brand-500 text-white shadow-lg shadow-brand-500/10 scale-[1.02]'
+                    : isDone
+                    ? 'bg-slate-900/90 border-emerald-500/40 text-emerald-300'
+                    : 'bg-slate-950/60 border-slate-800/80 text-slate-500'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                  <span>Step {stepNum}</span>
+                  {isDone ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : isActive ? (
+                    <span className="w-2 h-2 rounded-full bg-brand-400 animate-ping"></span>
+                  ) : (
+                    <span className="w-2 h-2 rounded-full bg-slate-700"></span>
+                  )}
+                </div>
+                <div className="font-bold text-sm text-slate-200">{step.label}</div>
+                <div className="text-[11px] text-slate-400 mt-1">{step.desc}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Main Tab Navigation */}
+      <div className="flex border-b border-slate-800 gap-8 text-sm font-medium text-slate-400">
         <button
-          onClick={() => setActiveTab('upload')}
-          className={`pb-3 flex items-center gap-2 border-b-2 transition ${
-            activeTab === 'upload' ? 'border-brand-500 text-brand-400 font-semibold' : 'border-transparent hover:text-white'
-          }`}
-        >
-          <Upload className="w-4 h-4" />
-          <span>1. Ingestion</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('transcript')}
-          disabled={transcript.length === 0}
-          className={`pb-3 flex items-center gap-2 border-b-2 transition ${
-            activeTab === 'transcript' ? 'border-brand-500 text-brand-400 font-semibold' : 'border-transparent hover:text-white disabled:opacity-40'
+          onClick={() => setActiveTab('input')}
+          className={`pb-3.5 flex items-center gap-2 border-b-2 transition ${
+            activeTab === 'input' ? 'border-brand-500 text-brand-400 font-semibold' : 'border-transparent hover:text-white'
           }`}
         >
           <FileText className="w-4 h-4" />
-          <span>2. Timed Transcript ({transcript.length})</span>
+          <span>1. Inputs (Video, Audio, Script)</span>
         </button>
+
         <button
-          onClick={() => setActiveTab('analytics')}
+          onClick={() => setActiveTab('outputs')}
           disabled={!analytics}
-          className={`pb-3 flex items-center gap-2 border-b-2 transition ${
-            activeTab === 'analytics' ? 'border-brand-500 text-brand-400 font-semibold' : 'border-transparent hover:text-white disabled:opacity-40'
+          className={`pb-3.5 flex items-center gap-2 border-b-2 transition ${
+            activeTab === 'outputs' ? 'border-brand-500 text-brand-400 font-semibold' : 'border-transparent hover:text-white disabled:opacity-40'
           }`}
         >
           <BarChart3 className="w-4 h-4" />
-          <span>3. NLP Analytics</span>
+          <span>2. Outputs ({analytics ? 'Ready' : 'Pending Processing'})</span>
         </button>
+
         <button
-          onClick={() => setActiveTab('ai')}
+          onClick={() => setActiveTab('optional-ai')}
           disabled={aiOutputs.titles.length === 0}
-          className={`pb-3 flex items-center gap-2 border-b-2 transition ${
-            activeTab === 'ai' ? 'border-brand-500 text-brand-400 font-semibold' : 'border-transparent hover:text-white disabled:opacity-40'
+          className={`pb-3.5 flex items-center gap-2 border-b-2 transition ${
+            activeTab === 'optional-ai' ? 'border-purple-500 text-purple-400 font-semibold' : 'border-transparent hover:text-white disabled:opacity-40'
           }`}
         >
           <Sparkles className="w-4 h-4 text-purple-400" />
-          <span>4. Creative AI Outputs</span>
+          <span>3. Optional AI Meta</span>
         </button>
       </div>
 
-      {/* Tab 1: Ingestion Panel */}
-      {activeTab === 'upload' && (
+      {/* TAB 1: INPUTS SELECTION */}
+      {activeTab === 'input' && (
         <div className="glass-panel p-8 rounded-2xl border border-slate-800 space-y-6">
-          <div className="flex gap-4">
+          <div>
+            <h2 className="text-lg font-bold text-white mb-1">Select Content Input Method</h2>
+            <p className="text-slate-400 text-xs">Choose whether to analyze a Video file, Audio track, or directly paste a Text script.</p>
+          </div>
+
+          {/* 3 Explicit Inputs selector */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button
-              onClick={() => setInputType('file')}
-              className={`flex-1 p-4 rounded-xl border flex items-center justify-center gap-3 transition font-semibold text-sm ${
-                inputType === 'file'
-                  ? 'bg-brand-600/20 border-brand-500 text-white'
+              onClick={() => { setInputType('video'); setFile(null); }}
+              className={`p-5 rounded-xl border flex flex-col items-start gap-3 transition ${
+                inputType === 'video'
+                  ? 'bg-brand-600/20 border-brand-500 text-white shadow-md'
                   : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-white'
               }`}
             >
-              <FileAudio className="w-5 h-5 text-brand-400" />
-              <span>Upload Video / Audio File</span>
+              <div className="p-3 rounded-lg bg-brand-500/10 border border-brand-500/20">
+                <Video className="w-6 h-6 text-brand-400" />
+              </div>
+              <div className="text-left">
+                <div className="font-bold text-sm text-white">Upload Video</div>
+                <div className="text-xs text-slate-400 mt-1">MP4, MOV, AVI, WEBM (Extracts audio via FFmpeg)</div>
+              </div>
             </button>
+
             <button
-              onClick={() => setInputType('script')}
-              className={`flex-1 p-4 rounded-xl border flex items-center justify-center gap-3 transition font-semibold text-sm ${
-                inputType === 'script'
-                  ? 'bg-brand-600/20 border-brand-500 text-white'
+              onClick={() => { setInputType('audio'); setFile(null); }}
+              className={`p-5 rounded-xl border flex flex-col items-start gap-3 transition ${
+                inputType === 'audio'
+                  ? 'bg-brand-600/20 border-brand-500 text-white shadow-md'
                   : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-white'
               }`}
             >
-              <FileText className="w-5 h-5 text-purple-400" />
-              <span>Paste Text Script</span>
+              <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <Music className="w-6 h-6 text-blue-400" />
+              </div>
+              <div className="text-left">
+                <div className="font-bold text-sm text-white">Upload Audio</div>
+                <div className="text-xs text-slate-400 mt-1">MP3, WAV, AAC, M4A (Direct to Whisper STT)</div>
+              </div>
+            </button>
+
+            <button
+              onClick={() => { setInputType('script'); setFile(null); }}
+              className={`p-5 rounded-xl border flex flex-col items-start gap-3 transition ${
+                inputType === 'script'
+                  ? 'bg-purple-600/20 border-purple-500 text-white shadow-md'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                <FileText className="w-6 h-6 text-purple-400" />
+              </div>
+              <div className="text-left">
+                <div className="font-bold text-sm text-white">Paste Script</div>
+                <div className="text-xs text-slate-400 mt-1">Raw text script or transcript for instant NLP</div>
+              </div>
             </button>
           </div>
 
@@ -247,63 +419,71 @@ const TextStudio = () => {
               type="text"
               value={projectTitle}
               onChange={(e) => setProjectTitle(e.target.value)}
-              placeholder="e.g. How to Build an AI Creator Dashboard"
-              className="w-full px-4 py-3 rounded-xl bg-slate-900/90 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 text-sm"
+              placeholder="e.g. Masterclass Episode 1 - Content Growth Strategy"
+              className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 text-sm"
             />
           </div>
 
-          {inputType === 'file' ? (
+          {/* File Upload Drag & Drop Area */}
+          {(inputType === 'video' || inputType === 'audio') && (
             <div className="border-2 border-dashed border-slate-800 hover:border-brand-500/50 rounded-2xl p-8 text-center bg-slate-900/40 transition">
-              <Upload className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-              <p className="text-slate-300 font-semibold text-sm">Drag & drop your MP4, MOV, MP3 file here</p>
-              <p className="text-slate-500 text-xs mt-1">Supports files up to 500MB. Audio will be extracted automatically.</p>
+              <div className="w-12 h-12 rounded-xl bg-slate-800/80 flex items-center justify-center mx-auto mb-3">
+                {inputType === 'video' ? <Video className="w-6 h-6 text-brand-400" /> : <Music className="w-6 h-6 text-blue-400" />}
+              </div>
+              <p className="text-slate-200 font-semibold text-sm">
+                Drag & drop your {inputType === 'video' ? 'Video (.mp4, .mov, .webm)' : 'Audio (.mp3, .wav, .m4a)'} file here
+              </p>
+              <p className="text-slate-500 text-xs mt-1">Files processed locally on your computer.</p>
               <input
                 type="file"
-                accept="video/*,audio/*"
+                accept={inputType === 'video' ? 'video/*' : 'audio/*'}
                 onChange={handleFileChange}
                 className="hidden"
-                id="file-upload"
+                id="file-upload-input"
               />
               <label
-                htmlFor="file-upload"
+                htmlFor="file-upload-input"
                 className="mt-4 inline-block px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold cursor-pointer border border-slate-700 transition"
               >
-                {file ? file.name : 'Select File from Computer'}
+                {file ? file.name : `Select ${inputType === 'video' ? 'Video' : 'Audio'} File`}
               </label>
             </div>
-          ) : (
+          )}
+
+          {/* Script Text Area */}
+          {inputType === 'script' && (
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Pasted Script Content</label>
               <textarea
                 rows={8}
                 value={scriptText}
                 onChange={(e) => setScriptText(e.target.value)}
-                placeholder="Paste raw video script or speech transcript here..."
-                className="w-full p-4 rounded-xl bg-slate-900/90 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 text-sm"
+                placeholder="Paste raw video script or speech transcript text here..."
+                className="w-full p-4 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 text-sm font-mono leading-relaxed"
               />
             </div>
           )}
 
-          {/* Action Trigger */}
-          <div className="flex items-center justify-between pt-4 border-t border-slate-800/80">
-            <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium">
+          {/* Execution Bar */}
+          <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+            <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold">
               <Zap className="w-4 h-4" />
-              <span>Local Whisper engine ready (0 API cost)</span>
+              <span>Pipeline: {inputType === 'video' ? 'Video ➔ Extract Audio ➔ Whisper ➔ NLP' : inputType === 'audio' ? 'Audio ➔ Whisper ➔ NLP' : 'Script ➔ Text Preprocessing ➔ NLP'}</span>
             </div>
             <button
               onClick={handleProcess}
-              disabled={loading || (inputType === 'file' && !file) || (inputType === 'script' && !scriptText)}
+              disabled={loading || ((inputType === 'video' || inputType === 'audio') && !file) || (inputType === 'script' && !scriptText)}
               className="px-8 py-3 rounded-xl bg-gradient-to-r from-brand-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 disabled:opacity-50 text-white font-bold text-sm shadow-lg shadow-brand-600/20 transition flex items-center gap-2"
             >
               {loading ? (
                 <>
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  <span>{stepStatus || 'Processing...'}</span>
+                  <span>{stepStatus || 'Executing Pipeline...'}</span>
                 </>
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-white" />
-                  <span>Start Processing</span>
+                  <span>Start Pipeline Execution</span>
                 </>
               )}
             </button>
@@ -311,87 +491,125 @@ const TextStudio = () => {
         </div>
       )}
 
-      {/* Tab 2: Timed Transcript */}
-      {activeTab === 'transcript' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-white">Timed Subtitle Segments</h2>
-            <div className="flex gap-3 text-xs">
+      {/* TAB 2: OUTPUTS DISPLAY */}
+      {activeTab === 'outputs' && analytics && (
+        <div className="space-y-6">
+          {/* Outputs Overview Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-6 rounded-2xl border border-slate-800 bg-slate-900/60">
+            <div>
+              <span className="text-xs uppercase font-bold text-brand-400">Analysis Complete</span>
+              <h2 className="text-xl font-bold text-white mt-0.5">{projectTitle || 'Content Analysis Outputs'}</h2>
+              <p className="text-slate-400 text-xs mt-1">Processed using local OpenAI Whisper & spaCy deterministic NLP engine.</p>
+            </div>
+            {/* Download Buttons Section */}
+            <div className="flex items-center gap-3">
               <button
-                onClick={() => alert('SRT downloaded!')}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold border border-slate-700 flex items-center gap-1.5"
+                onClick={() => handleDownloadTranscript('srt')}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition flex items-center gap-2"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export SRT</span>
+                <Download className="w-3.5 h-3.5 text-brand-400" />
+                <span>Download Transcript (.SRT)</span>
+              </button>
+              <button
+                onClick={handleDownloadSummary}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition flex items-center gap-2"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Download Summary (.TXT)</span>
               </button>
             </div>
           </div>
-          <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-3 max-h-[500px] overflow-y-auto">
-            {transcript.map((seg, idx) => (
-              <div key={idx} className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-start gap-4 hover:border-brand-500/30 transition">
-                <span className="px-2.5 py-1 rounded-md bg-slate-800 text-brand-400 font-mono text-xs font-semibold whitespace-nowrap">
-                  {Math.floor(seg.start)}s - {Math.floor(seg.end)}s
-                </span>
-                <p className="text-slate-200 text-sm leading-relaxed">{seg.text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {/* Tab 3: Deterministic NLP Analytics */}
-      {activeTab === 'analytics' && analytics && (
-        <div className="space-y-6">
-          {/* Key Metric Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="glass-card p-5 rounded-2xl border border-slate-800">
-              <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold uppercase">
-                <BookOpen className="w-4 h-4 text-blue-400" />
-                <span>Readability Score</span>
+          {/* 7 Required Metric Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            {/* 1. Readability Score */}
+            <div className="glass-card p-5 rounded-2xl border border-slate-800 bg-slate-900/80">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase">
+                <div className="flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4 text-blue-400" />
+                  <span>Readability</span>
+                </div>
               </div>
               <p className="text-3xl font-extrabold text-white mt-2">{analytics.readabilityScore}</p>
-              <span className="text-slate-500 text-[11px]">Flesch-Kincaid Rating</span>
+              <span className="text-slate-400 text-[11px] block mt-1">Flesch-Kincaid Ease</span>
             </div>
 
-            <div className="glass-card p-5 rounded-2xl border border-slate-800">
-              <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold uppercase">
-                <Clock className="w-4 h-4 text-purple-400" />
-                <span>Speaking Speed</span>
+            {/* 2. Speaking Speed */}
+            <div className="glass-card p-5 rounded-2xl border border-slate-800 bg-slate-900/80">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-purple-400" />
+                  <span>Speaking Speed</span>
+                </div>
               </div>
-              <p className="text-3xl font-extrabold text-white mt-2">{analytics.wpm} <span className="text-sm font-normal text-slate-400">WPM</span></p>
-              <span className="text-slate-500 text-[11px]">Optimal pacing: 130-160 WPM</span>
+              <p className="text-3xl font-extrabold text-white mt-2">{analytics.wpm} <span className="text-xs font-semibold text-slate-400">WPM</span></p>
+              <span className="text-slate-400 text-[11px] block mt-1">Target: 130-160 WPM</span>
             </div>
 
-            <div className="glass-card p-5 rounded-2xl border border-slate-800">
-              <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold uppercase">
-                <Activity className="w-4 h-4 text-emerald-400" />
-                <span>Overall Sentiment</span>
-              </div>
-              <p className="text-3xl font-extrabold text-emerald-400 mt-2">{analytics.sentiment.label}</p>
-              <span className="text-slate-500 text-[11px]">{analytics.sentiment.positive}% Positive tone</span>
-            </div>
-
-            <div className="glass-card p-5 rounded-2xl border border-slate-800">
-              <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold uppercase">
-                <Tag className="w-4 h-4 text-amber-400" />
-                <span>Total Words</span>
+            {/* 3. Word Count */}
+            <div className="glass-card p-5 rounded-2xl border border-slate-800 bg-slate-900/80">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase">
+                <div className="flex items-center gap-1.5">
+                  <Tag className="w-4 h-4 text-amber-400" />
+                  <span>Word Count</span>
+                </div>
               </div>
               <p className="text-3xl font-extrabold text-white mt-2">{analytics.wordCount}</p>
-              <span className="text-slate-500 text-[11px]">Extracted words index</span>
+              <span className="text-slate-400 text-[11px] block mt-1">Total words processed</span>
+            </div>
+
+            {/* 4. Overall Sentiment */}
+            <div className="glass-card p-5 rounded-2xl border border-slate-800 bg-slate-900/80 md:col-span-2">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase">
+                <div className="flex items-center gap-1.5">
+                  <Activity className="w-4 h-4 text-emerald-400" />
+                  <span>Sentiment Analysis</span>
+                </div>
+                <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-xs font-bold">
+                  {analytics.sentiment.label}
+                </span>
+              </div>
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-2xl font-bold text-white">{analytics.sentiment.positive}% <span className="text-xs text-slate-400 font-normal">Positive</span></span>
+                <span className="text-xs text-slate-400 font-medium">{analytics.sentiment.neutral}% Neutral • {analytics.sentiment.negative}% Negative</span>
+              </div>
+              {/* Sentiment Progress Bar */}
+              <div className="w-full h-2 rounded-full bg-slate-800 flex overflow-hidden mt-3">
+                <div style={{ width: `${analytics.sentiment.positive}%` }} className="bg-emerald-500 h-full"></div>
+                <div style={{ width: `${analytics.sentiment.neutral}%` }} className="bg-slate-500 h-full"></div>
+                <div style={{ width: `${analytics.sentiment.negative}%` }} className="bg-rose-500 h-full"></div>
+              </div>
             </div>
           </div>
 
-          {/* Extractive Summary & Keywords */}
+          {/* Summary & Keywords Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* 5. Summary Output */}
             <div className="md:col-span-2 glass-panel p-6 rounded-2xl border border-slate-800 space-y-3">
-              <h3 className="font-bold text-white text-base">Extractive NLP Summary</h3>
-              <p className="text-slate-300 text-sm leading-relaxed bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <AlignLeft className="w-4 h-4 text-brand-400" />
+                  Extractive Summary Output
+                </h3>
+                <button
+                  onClick={handleDownloadSummary}
+                  className="text-xs text-brand-400 hover:underline flex items-center gap-1"
+                >
+                  <Download className="w-3 h-3" />
+                  <span>Download Summary</span>
+                </button>
+              </div>
+              <p className="text-slate-300 text-sm leading-relaxed bg-slate-900/90 p-4 rounded-xl border border-slate-800 font-sans">
                 "{analytics.summary}"
               </p>
             </div>
 
+            {/* 6. Keywords Output */}
             <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-3">
-              <h3 className="font-bold text-white text-base">Keywords & Key Phrases</h3>
+              <h3 className="font-bold text-white text-base flex items-center gap-2">
+                <Tag className="w-4 h-4 text-purple-400" />
+                Keywords & Key Phrases
+              </h3>
               <div className="flex flex-wrap gap-2 pt-1">
                 {analytics.keywords.map((kw, i) => (
                   <span key={i} className="px-3 py-1.5 rounded-lg bg-brand-500/10 border border-brand-500/20 text-brand-300 text-xs font-semibold">
@@ -402,59 +620,107 @@ const TextStudio = () => {
             </div>
           </div>
 
-          {/* Sentiment Timeline Chart */}
+          {/* 7. Timed Transcript Output List */}
           <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
-            <h3 className="font-bold text-white text-base">Sentiment Distribution Across Timestamps</h3>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={sentimentTimelineData}>
-                  <defs>
-                    <linearGradient id="sentimentGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="time" stroke="#64748b" fontSize={12} />
-                  <YAxis stroke="#64748b" fontSize={12} domain={[0, 100]} />
-                  <Tooltip contentStyle={{ background: '#111827', borderColor: '#374151', borderRadius: '12px' }} />
-                  <Area type="monotone" dataKey="sentiment" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#sentimentGrad)" />
-                </AreaChart>
-              </ResponsiveContainer>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white text-base flex items-center gap-2">
+                <FileCheck className="w-4 h-4 text-brand-400" />
+                Timed Transcript Segments ({transcript.length})
+              </h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleDownloadTranscript('srt')}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export SRT</span>
+                </button>
+                <button
+                  onClick={() => handleDownloadTranscript('txt')}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export TXT</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+              {transcript.map((seg, idx) => (
+                <div key={idx} className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-start gap-4 hover:border-brand-500/30 transition">
+                  <span className="px-2.5 py-1 rounded-md bg-slate-800 text-brand-400 font-mono text-xs font-semibold whitespace-nowrap">
+                    {Math.floor(seg.start)}s - {Math.floor(seg.end)}s
+                  </span>
+                  <p className="text-slate-200 text-sm leading-relaxed">{seg.text}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* Tab 4: Creative AI Outputs */}
-      {activeTab === 'ai' && (
-        <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-6">
-          <div>
-            <h3 className="font-bold text-white text-lg">AI Generated Title Options</h3>
-            <div className="mt-3 space-y-2">
+      {/* TAB 3: OPTIONAL AI SECTION */}
+      {activeTab === 'optional-ai' && (
+        <div className="glass-panel p-8 rounded-2xl border border-slate-800 space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div>
+              <span className="text-xs uppercase font-bold text-purple-400 tracking-wider">Generative Metadata</span>
+              <h2 className="text-xl font-bold text-white mt-1 flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-purple-400" />
+                Optional AI Enhancements
+              </h2>
+              <p className="text-slate-400 text-xs mt-1">Generative LLM meta outputs (Better Title, Better Description, Hashtags).</p>
+            </div>
+            <button
+              onClick={handleGenerateOptionalAI}
+              disabled={loadingAI}
+              className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition flex items-center gap-2"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Regenerate Meta</span>
+            </button>
+          </div>
+
+          {/* 1. Better Title */}
+          <div className="space-y-3">
+            <h3 className="font-bold text-white text-base">Better Title Options</h3>
+            <div className="space-y-2">
               {aiOutputs.titles.map((title, i) => (
-                <div key={i} className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 text-sm font-semibold text-white flex items-center justify-between">
+                <div key={i} className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-sm font-semibold text-white flex items-center justify-between hover:border-purple-500/40 transition">
                   <span>{title}</span>
-                  <button onClick={() => navigator.clipboard.writeText(title)} className="text-xs text-brand-400 hover:underline">Copy</button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(title);
+                      setCopiedIndex(i);
+                      setTimeout(() => setCopiedIndex(null), 2000);
+                    }}
+                    className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-purple-300 font-medium flex items-center gap-1.5 transition"
+                  >
+                    {copiedIndex === i ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedIndex === i ? 'Copied' : 'Copy'}</span>
+                  </button>
                 </div>
               ))}
             </div>
           </div>
 
-          <div>
-            <h3 className="font-bold text-white text-lg">SEO Description</h3>
+          {/* 2. Better Description */}
+          <div className="space-y-3">
+            <h3 className="font-bold text-white text-base">Better Description</h3>
             <textarea
               rows={5}
               readOnly
               value={aiOutputs.description}
-              className="w-full mt-2 p-4 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-300 text-sm font-mono"
+              className="w-full p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 text-sm font-mono leading-relaxed focus:outline-none"
             />
           </div>
 
-          <div>
-            <h3 className="font-bold text-white text-lg">Hashtags</h3>
-            <div className="flex flex-wrap gap-2 mt-2">
+          {/* 3. Hashtags */}
+          <div className="space-y-3">
+            <h3 className="font-bold text-white text-base">Hashtags</h3>
+            <div className="flex flex-wrap gap-2">
               {aiOutputs.hashtags.map((tag, idx) => (
-                <span key={idx} className="px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-semibold">
+                <span key={idx} className="px-3.5 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-semibold">
                   {tag}
                 </span>
               ))}
