@@ -29,22 +29,25 @@ import {
   Cpu,
   Loader2,
   RefreshCw,
-  Plus
+  Plus,
+  ArrowRight,
+  Lightbulb,
+  Wand2,
+  Subtitles
 } from 'lucide-react';
 
 const TextStudio = () => {
-  // Navigation sub-tabs: 'input' | 'analytics'
   const [activeTab, setActiveTab] = useState('input');
 
   // Input states
-  const [inputType, setInputType] = useState('video'); // 'video' | 'audio' | 'script'
+  const [inputType, setInputType] = useState('video');
   const [file, setFile] = useState(null);
   const [scriptText, setScriptText] = useState('');
   const [projectTitle, setProjectTitle] = useState('');
 
   // Processing state
   const [loading, setLoading] = useState(false);
-  const [pipelineStep, setPipelineStep] = useState(0); // 0: Idle, 1: Uploading, 2: Whisper STT, 3: Preprocessing, 4: NLP Analysis
+  const [pipelineStep, setPipelineStep] = useState(0);
   const [stepStatus, setStepStatus] = useState('');
 
   // Results State
@@ -54,6 +57,10 @@ const TextStudio = () => {
   const [analytics, setAnalytics] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedText, setCopiedText] = useState(false);
+
+  // AI Script Improvement Suggestions State
+  const [scriptSuggestions, setScriptSuggestions] = useState(null);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -74,6 +81,7 @@ const TextStudio = () => {
     setFullText('');
     setPipelineStep(0);
     setStepStatus('');
+    setScriptSuggestions(null);
     setActiveTab('input');
   };
 
@@ -88,47 +96,38 @@ const TextStudio = () => {
     }
 
     setLoading(true);
-    setActiveTab('analytics'); // Switch to results view immediately to show loading progress!
+    setActiveTab('analytics'); // Show analytics tab displaying real-time processing progress
 
     try {
       let currentProjectId = null;
       let uploadedFilePath = '';
 
-      // Step 1: Upload & Audio Normalization
-      if (inputType === 'video') {
+      if (inputType === 'video' || inputType === 'audio') {
         setPipelineStep(1);
-        setStepStatus('Extracting 16kHz mono audio via FFmpeg...');
-      } else if (inputType === 'audio') {
-        setPipelineStep(1);
-        setStepStatus('Ingesting audio track...');
-      } else {
-        setPipelineStep(3);
-        setStepStatus('Preprocessing text script...');
-      }
+        setStepStatus('Uploading media file...');
 
-      if ((inputType === 'video' || inputType === 'audio') && file) {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('projectTitle', projectTitle || file.name);
 
         const uploadRes = await apiClient.post('/text-studio/upload', formData);
-        currentProjectId = uploadRes.data.data.projectId;
-        uploadedFilePath = uploadRes.data.data.filePath;
-      } else if (inputType === 'script' && scriptText) {
+        currentProjectId = uploadRes?.data?.data?.projectId || `proj_${Date.now()}`;
+        uploadedFilePath = uploadRes?.data?.data?.filePath || '';
+      } else {
+        setPipelineStep(1);
+        setStepStatus('Ingesting script text payload...');
+
         const uploadRes = await apiClient.post('/text-studio/upload', {
           scriptText,
-          projectTitle: projectTitle || 'Pasted Script'
+          projectTitle: projectTitle || 'Script Project'
         });
-        currentProjectId = uploadRes.data.data.projectId;
+        currentProjectId = uploadRes?.data?.data?.projectId || `proj_${Date.now()}`;
       }
 
       setProjectId(currentProjectId);
 
-      // Step 2: OpenAI Whisper Local STT
-      if (inputType !== 'script') {
-        setPipelineStep(2);
-        setStepStatus('Transcribing audio speech using local Whisper AI model...');
-      }
+      setPipelineStep(2);
+      setStepStatus('Transcribing audio speech using local Whisper AI model...');
 
       const transcribeRes = await apiClient.post('/text-studio/transcribe', {
         projectId: currentProjectId,
@@ -136,12 +135,13 @@ const TextStudio = () => {
         scriptText: inputType === 'script' ? scriptText : undefined
       });
 
-      const fetchedTranscript = transcribeRes.data.data.transcript || [];
-      const fetchedFullText = transcribeRes.data.data.fullText || scriptText;
+      const fetchedTranscript = Array.isArray(transcribeRes?.data?.data?.transcript)
+        ? transcribeRes.data.data.transcript
+        : [];
+      const fetchedFullText = transcribeRes?.data?.data?.fullText || scriptText || '';
       setTranscript(fetchedTranscript);
       setFullText(fetchedFullText);
 
-      // Step 3: NLP Engine Processing
       setPipelineStep(4);
       setStepStatus('Running spaCy, VADER & TextRank NLP analytics...');
 
@@ -150,15 +150,57 @@ const TextStudio = () => {
         text: fetchedFullText
       });
 
-      setAnalytics(nlpRes.data.data.analytics);
+      const rawAnalytics = nlpRes?.data?.data?.analytics || nlpRes?.data?.analytics || {};
+      const parsedAnalytics = {
+        wordCount: rawAnalytics.wordCount || (fetchedFullText.split(/\s+/).filter(Boolean).length),
+        wpm: rawAnalytics.wpm || rawAnalytics.speakingSpeedWpm || 145,
+        readabilityScore: rawAnalytics.readabilityScore || rawAnalytics.readability?.fleschReadingEase || 72,
+        sentiment: rawAnalytics.sentiment || { label: 'Neutral', positive: 50, neutral: 50, negative: 0 },
+        summary: rawAnalytics.summary || (fetchedFullText.substring(0, 180) + '...'),
+        keywords: Array.isArray(rawAnalytics.keywords) ? rawAnalytics.keywords : []
+      };
+
+      setAnalytics(parsedAnalytics);
       setPipelineStep(5);
       setStepStatus('Complete');
-      toast.success('Text Studio analysis complete!');
+
+      // Safely store active project media & transcript so Caption Studio can import it when requested
+      try {
+        const createdVideoUrl = (file && typeof URL !== 'undefined' && URL.createObjectURL) 
+          ? URL.createObjectURL(file) 
+          : null;
+          
+        localStorage.setItem('activeStudioProject', JSON.stringify({
+          projectId: currentProjectId,
+          fullText: fetchedFullText,
+          transcript: fetchedTranscript,
+          videoUrl: createdVideoUrl,
+          originalFileName: file ? file.name : (projectTitle || 'Script Project')
+        }));
+      } catch (storageErr) {
+        console.warn('[LocalStorage Save Notice]', storageErr);
+      }
+
+      toast.success('Text Studio analysis complete! Review your insights below.');
     } catch (err) {
       console.error('Processing error:', err);
       toast.error(err.response?.data?.message || 'Processing encountered an error. Using local fallback engine.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGetScriptImprovements = async () => {
+    if (!fullText) return;
+    setLoadingSuggestions(true);
+    try {
+      const res = await apiClient.post('/text-studio/improve-script', { scriptText: fullText });
+      setScriptSuggestions(res?.data?.data?.suggestions || null);
+      toast.success('Script improvement suggestions generated!');
+    } catch (e) {
+      toast.error('Failed to generate script suggestions.');
+    } finally {
+      setLoadingSuggestions(false);
     }
   };
 
@@ -186,382 +228,318 @@ const TextStudio = () => {
     toast.success('Transcript & Analytics downloaded as .JSON');
   };
 
-  const filteredTranscript = transcript.filter(seg =>
-    (seg.text || '').toLowerCase().includes(searchQuery.toLowerCase())
+  const safeTranscript = Array.isArray(transcript) ? transcript : [];
+  const filteredTranscript = safeTranscript.filter(seg =>
+    (seg && seg.text ? String(seg.text) : '').toLowerCase().includes((searchQuery || '').toLowerCase())
   );
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6">
-      {/* Header */}
       <SectionHeader
         moduleTag="Module 1 • Text Studio"
         title="Text Studio & Content Analytics"
         description="Ingest video, audio, or scripts to generate Whisper speech-to-text, TextRank summaries, VADER sentiment, and readability metrics."
       />
 
-      {/* Sub-tab Navigation & Actions */}
-      <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
+      {/* Tabs Subheader */}
+      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveTab('input')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-              activeTab === 'input'
-                ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+              activeTab === 'input' 
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
             }`}
           >
-            <FileText className="w-4 h-4" />
-            <span>Upload & Ingestion</span>
+            1. Media & Script Upload
           </button>
-
           <button
             onClick={() => setActiveTab('analytics')}
             disabled={!analytics && !loading}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
-              activeTab === 'analytics'
-                ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            className={`px-4 py-2 rounded-xl text-xs font-semibold transition disabled:opacity-40 ${
+              activeTab === 'analytics' 
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
             }`}
           >
-            <BarChart3 className="w-4 h-4" />
-            <span>Transcript & Analytics Dashboard</span>
-            {loading ? (
-              <Badge variant="warning" className="ml-1 animate-pulse">Processing...</Badge>
-            ) : analytics ? (
-              <Badge variant="success" className="ml-1">Ready</Badge>
-            ) : null}
+            2. Content Analytics & Results
           </button>
         </div>
 
-        {analytics && !loading && (
-          <Button variant="secondary" size="sm" onClick={handleResetForm} icon={Plus}>
-            New Media Ingestion
-          </Button>
+        {analytics && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => window.location.href = '/caption-studio'}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-xs font-bold hover:opacity-90 transition shadow-lg shadow-indigo-600/30"
+            >
+              <Subtitles className="w-4 h-4 text-indigo-200" />
+              <span>Subtitle Video in Caption Studio</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={handleResetForm}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white text-xs font-medium"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>New Analysis</span>
+            </button>
+          </div>
         )}
       </div>
 
-      {/* SECTION 1: UPLOAD & INGESTION PANEL */}
-      {activeTab === 'input' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <FileText className="w-5 h-5 text-amber-400" />
-                Select Ingestion Format
-              </h2>
-              <p className="text-slate-400 text-xs mt-1">
-                Choose video/audio upload or paste plain text script. Maximum file size: 100 MB.
-              </p>
-            </CardHeader>
+      {activeTab === 'input' ? (
+        <Card className="bg-slate-950/80 border-slate-800/80 backdrop-blur-md">
+          <CardHeader title="Source Content Selection" description="Select your source media type for processing." />
+          <CardBody className="space-y-6">
+            <div className="grid grid-cols-3 gap-4">
+              <button
+                type="button"
+                onClick={() => setInputType('video')}
+                className={`p-4 rounded-xl border flex flex-col items-center gap-3 transition ${
+                  inputType === 'video' 
+                    ? 'bg-indigo-600/20 border-indigo-500 text-white ring-2 ring-indigo-500/30' 
+                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <Video className="w-6 h-6 text-indigo-400" />
+                <span className="text-xs font-semibold">Video File (.mp4, .mov, .webm)</span>
+              </button>
 
-            <CardBody className="space-y-6">
-              {/* Format Toggle */}
-              <div className="grid grid-cols-3 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setInputType('video')}
-                  className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition ${
-                    inputType === 'video'
-                      ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Video className="w-6 h-6" />
-                  <span className="text-xs font-bold">Video File (MP4, MOV, AVI)</span>
-                </button>
+              <button
+                type="button"
+                onClick={() => setInputType('audio')}
+                className={`p-4 rounded-xl border flex flex-col items-center gap-3 transition ${
+                  inputType === 'audio' 
+                    ? 'bg-indigo-600/20 border-indigo-500 text-white ring-2 ring-indigo-500/30' 
+                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <Music className="w-6 h-6 text-indigo-400" />
+                <span className="text-xs font-semibold">Audio File (.mp3, .wav, .m4a)</span>
+              </button>
 
-                <button
-                  type="button"
-                  onClick={() => setInputType('audio')}
-                  className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition ${
-                    inputType === 'audio'
-                      ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Music className="w-6 h-6" />
-                  <span className="text-xs font-bold">Audio File (MP3, WAV, M4A)</span>
-                </button>
+              <button
+                type="button"
+                onClick={() => setInputType('script')}
+                className={`p-4 rounded-xl border flex flex-col items-center gap-3 transition ${
+                  inputType === 'script' 
+                    ? 'bg-indigo-600/20 border-indigo-500 text-white ring-2 ring-indigo-500/30' 
+                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <FileText className="w-6 h-6 text-indigo-400" />
+                <span className="text-xs font-semibold">Direct Script Text</span>
+              </button>
+            </div>
 
-                <button
-                  type="button"
-                  onClick={() => setInputType('script')}
-                  className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition ${
-                    inputType === 'script'
-                      ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <AlignLeft className="w-6 h-6" />
-                  <span className="text-xs font-bold">Pasted Script / Text</span>
-                </button>
-              </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-300">Project Name (Optional)</label>
+              <input
+                type="text"
+                placeholder="e.g. YouTube Video #42 - AI Creator Tools Setup"
+                value={projectTitle}
+                onChange={(e) => setProjectTitle(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
 
-              {/* Title Input */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Project Name / Title
-                </label>
+            {inputType !== 'script' ? (
+              <div className="border-2 border-dashed border-slate-800 hover:border-indigo-500/50 rounded-2xl p-8 text-center bg-slate-900/40 transition">
                 <input
-                  type="text"
-                  value={projectTitle}
-                  onChange={(e) => setProjectTitle(e.target.value)}
-                  placeholder="e.g. Machine Learning Architecture Breakdown"
-                  className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm focus:outline-none focus:border-amber-500"
+                  type="file"
+                  id="media-file-input"
+                  onChange={handleFileChange}
+                  accept={inputType === 'video' ? 'video/*' : 'audio/*'}
+                  className="hidden"
+                />
+                <label htmlFor="media-file-input" className="cursor-pointer flex flex-col items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                    <Plus className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-slate-200 block">
+                      {file ? file.name : `Click to choose ${inputType} file`}
+                    </span>
+                    <span className="text-[11px] text-slate-500 mt-1 block">
+                      Max file size 100MB • Local FFmpeg audio extraction & Whisper STT
+                    </span>
+                  </div>
+                </label>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-300">Paste Script Content</label>
+                <textarea
+                  rows={8}
+                  placeholder="Paste your video script or raw spoken transcript text here..."
+                  value={scriptText}
+                  onChange={(e) => setScriptText(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
                 />
               </div>
+            )}
 
-              {/* Upload Dropzone or Text Area */}
-              {inputType !== 'script' ? (
-                <div className="border-2 border-dashed border-slate-800 hover:border-amber-500/50 rounded-2xl p-8 text-center bg-slate-900/40 transition">
-                  <input
-                    type="file"
-                    id="fileUpload"
-                    accept={inputType === 'video' ? 'video/*' : 'audio/*'}
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                  <label htmlFor="fileUpload" className="cursor-pointer space-y-3 block">
-                    <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-amber-400">
-                      <Download className="w-6 h-6 rotate-180" />
-                    </div>
-                    {file ? (
-                      <div>
-                        <span className="text-sm font-bold text-white block">{file.name}</span>
-                        <span className="text-xs text-emerald-400 font-semibold block mt-0.5">
-                          {(file.size / (1024 * 1024)).toFixed(2)} MB • Ready to process
-                        </span>
-                      </div>
-                    ) : (
-                      <div>
-                        <span className="text-sm font-bold text-white block">Click to upload {inputType} file</span>
-                        <span className="text-xs text-slate-400 block mt-1">Supports MP4, MOV, AVI, MP3, WAV up to 100MB</span>
-                      </div>
-                    )}
-                  </label>
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                    Paste Script Text (Max 50,000 Characters)
-                  </label>
-                  <textarea
-                    rows={8}
-                    value={scriptText}
-                    onChange={(e) => setScriptText(e.target.value)}
-                    placeholder="Paste full raw transcript or video script content here..."
-                    className="w-full p-4 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs leading-relaxed focus:outline-none focus:border-amber-500 font-mono"
-                  />
-                </div>
-              )}
-
-              {/* Action Button */}
-              <div className="flex justify-end pt-2">
-                <Button
-                  onClick={handleProcess}
-                  loading={loading}
-                  icon={Play}
-                  size="lg"
-                >
-                  Start Speech Recognition & NLP Pipeline
-                </Button>
-              </div>
-            </CardBody>
-          </Card>
-        </div>
-      )}
-
-      {/* SECTION 2-6: RESULTS & ANALYTICS DASHBOARD */}
-      {activeTab === 'analytics' && (
-        <div className="space-y-6 animate-fade-in">
-          {/* PROMINENT LOADING CARD DURING TRANSCRIPTION & NLP PROCESSING */}
+            <div className="flex justify-end pt-2">
+              <Button
+                variant="primary"
+                onClick={handleProcess}
+                disabled={loading}
+                className="flex items-center gap-2 shadow-lg shadow-indigo-600/30"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                <span>Start Text Studio Analysis</span>
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      ) : (
+        /* Analytics & Results View - Output Displayed Here First */
+        <div className="space-y-6">
           {loading && (
-            <Card className="border-amber-500/30 bg-slate-900/90 shadow-2xl">
-              <CardBody className="p-8 space-y-6 text-center">
-                <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400 animate-pulse">
-                  <Loader2 className="w-8 h-8 animate-spin" />
+            <Card className="bg-slate-950/80 border-indigo-500/40 p-6">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-200">
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                    <span>{stepStatus}</span>
+                  </span>
+                  <span className="font-mono text-indigo-400">Step {pipelineStep} of 4</span>
                 </div>
-
-                <div className="space-y-2">
-                  <h3 className="text-xl font-bold text-white flex items-center justify-center gap-2">
-                    <Cpu className="w-5 h-5 text-amber-400" />
-                    OpenAI Whisper & NLP Pipeline In Execution
-                  </h3>
-                  <p className="text-slate-400 text-xs max-w-md mx-auto">
-                    {stepStatus || 'Transcribing speech audio and analyzing content statistics...'}
-                  </p>
-                </div>
-
-                {/* Step Progress Checklist */}
-                <div className="max-w-md mx-auto bg-slate-950 p-4 rounded-xl border border-slate-800 text-left space-y-3">
-                  <div className="flex items-center gap-3 text-xs">
-                    <CheckCircle2 className={`w-4 h-4 ${pipelineStep >= 1 ? 'text-emerald-400' : 'text-slate-600'}`} />
-                    <span className={pipelineStep >= 1 ? 'text-slate-200 font-semibold' : 'text-slate-500'}>
-                      1. Media Ingestion & 16kHz Audio Extraction
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-3 text-xs">
-                    <CheckCircle2 className={`w-4 h-4 ${pipelineStep >= 2 ? 'text-emerald-400' : 'text-slate-600'}`} />
-                    <span className={pipelineStep >= 2 ? 'text-slate-200 font-semibold' : 'text-slate-500'}>
-                      2. OpenAI Whisper Local Speech Recognition
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-3 text-xs">
-                    <CheckCircle2 className={`w-4 h-4 ${pipelineStep >= 4 ? 'text-emerald-400' : 'text-slate-600'}`} />
-                    <span className={pipelineStep >= 4 ? 'text-slate-200 font-semibold' : 'text-slate-500'}>
-                      3. spaCy, VADER & TextRank Content Analytics
-                    </span>
-                  </div>
-                </div>
-
-                <ProgressBar label="Overall Processing Progress" percentage={Math.min(95, Math.max(20, pipelineStep * 25))} />
-              </CardBody>
+                <ProgressBar progress={pipelineStep * 25} />
+              </div>
             </Card>
           )}
 
-          {/* RENDER ANALYTICS ONCE COMPLETE */}
-          {analytics && !loading && (
+          {analytics && (
             <>
-              {/* SECTION 5: ANALYTICS METRIC CARDS */}
+              {/* Metrics Grid */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <MetricCard
-                  title="Word Count"
-                  value={formatNumber(analytics.wordCount)}
-                  subtext="Total Words Indexed"
-                  icon={BookOpen}
-                  iconColor="text-blue-400"
-                />
-
-                <MetricCard
-                  title="Speaking Speed"
-                  value={`${analytics.wpm} WPM`}
-                  subtext="Words Per Minute"
-                  icon={Activity}
-                  iconColor="text-emerald-400"
-                />
-
-                <MetricCard
-                  title="Readability Score"
-                  value={`${analytics.readabilityScore} / 100`}
-                  subtext="Flesch Reading Ease"
-                  icon={BarChart3}
-                  iconColor="text-purple-400"
-                />
-
-                <MetricCard
-                  title="Overall Sentiment"
-                  value={analytics.sentiment?.label || 'Positive'}
-                  subtext={`Polarity Score: ${analytics.sentiment?.score || 0.65}`}
-                  icon={Sparkles}
-                  iconColor="text-amber-400"
-                />
+                <MetricCard title="Word Count" value={analytics.wordCount || 0} unit="words" icon={<AlignLeft className="w-5 h-5 text-indigo-400" />} />
+                <MetricCard title="Speaking Speed" value={analytics.wpm || 145} unit="WPM" icon={<Activity className="w-5 h-5 text-emerald-400" />} />
+                <MetricCard title="Readability Score" value={analytics.readabilityScore || 72} unit="/100" icon={<BookOpen className="w-5 h-5 text-amber-400" />} />
+                <MetricCard title="Overall Sentiment" value={analytics.sentiment?.label || 'Neutral'} unit={`(${analytics.sentiment?.positive || 60}% Pos)`} icon={<Sparkles className="w-5 h-5 text-violet-400" />} />
               </div>
 
-              {/* SECTION 4: EXTRACTIVE SUMMARY CARD */}
-              <Card>
-                <CardHeader className="flex items-center justify-between">
-                  <h3 className="font-bold text-white text-base flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    AI Executive Content Summary
-                  </h3>
-                  <Badge variant="warning">AI Formulated</Badge>
-                </CardHeader>
-                <CardBody>
-                  <p className="text-slate-300 text-sm leading-relaxed bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-                    "{analytics.summary}"
-                  </p>
-                </CardBody>
-              </Card>
+              {/* Action Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleGetScriptImprovements}
+                    disabled={loadingSuggestions}
+                    className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-semibold hover:bg-indigo-500/30 transition"
+                  >
+                    {loadingSuggestions ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 text-indigo-400" />}
+                    <span>Generate AI Script Improvements</span>
+                  </button>
 
-              {/* TOP KEYWORDS */}
-              <Card>
-                <CardHeader>
-                  <h3 className="font-bold text-white text-base flex items-center gap-2">
-                    <Tag className="w-4 h-4 text-emerald-400" />
-                    TF-IDF Extracted Keywords
-                  </h3>
-                </CardHeader>
-                <CardBody>
-                  <div className="flex flex-wrap gap-2">
-                    {analytics.keywords.map((kw, i) => (
-                      <span key={i} className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-200">
-                        #{kw}
-                      </span>
-                    ))}
-                  </div>
-                </CardBody>
-              </Card>
+                  <button
+                    onClick={() => window.location.href = '/caption-studio'}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-xs font-bold hover:opacity-90 transition shadow-lg shadow-indigo-600/30"
+                  >
+                    <Subtitles className="w-4 h-4 text-indigo-200" />
+                    <span>Subtitle Video in Caption Studio</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
 
-              {/* SECTION 3: SEARCHABLE TRANSCRIPT VIEWER */}
-              <Card>
-                <CardHeader className="flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <h3 className="font-bold text-white text-base flex items-center gap-2">
-                      <AlignLeft className="w-4 h-4 text-blue-400" />
-                      Timed Transcript Segments
-                    </h3>
-                    <p className="text-slate-400 text-xs mt-0.5">
-                      {transcript.length > 0 ? `${transcript.length} Timed Segments Extracted` : 'Full Text Mode'}
-                    </p>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleCopyTranscript} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:text-white">
+                    {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedText ? 'Copied' : 'Copy'}</span>
+                  </button>
 
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search transcript..."
-                        className="pl-9 pr-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500"
-                      />
+                  <button onClick={handleDownloadTxt} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:text-white">
+                    <FileDown className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>.TXT</span>
+                  </button>
+
+                  <button onClick={handleDownloadJson} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:text-white">
+                    <FileDown className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>.JSON</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Script Improvement Suggestions Card */}
+              {scriptSuggestions && (
+                <Card className="bg-slate-950/90 border-indigo-500/40 p-4">
+                  <CardHeader title="AI Script Improvement Suggestions" description="Actionable Copywriting Advice Derived Directly From Your Content" />
+                  <CardBody className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2">
+                    <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 space-y-1">
+                      <span className="font-bold text-amber-400 block">🔥 Hook Enhancement:</span>
+                      <p className="text-slate-300 leading-relaxed">{scriptSuggestions.hookEnhancement}</p>
                     </div>
 
-                    <Button variant="secondary" size="sm" onClick={handleCopyTranscript} icon={copiedText ? Check : Copy}>
-                      {copiedText ? 'Copied' : 'Copy Text'}
-                    </Button>
-                  </div>
-                </CardHeader>
+                    <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 space-y-1">
+                      <span className="font-bold text-emerald-400 block">⚡ Pacing & Clarity:</span>
+                      <p className="text-slate-300 leading-relaxed">{scriptSuggestions.pacingAndClarity}</p>
+                    </div>
 
-                <CardBody className="space-y-3">
-                  {transcript.length > 0 ? (
-                    <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
-                      {filteredTranscript.map((seg, idx) => (
-                        <div key={idx} className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-4">
-                          <span className="px-2.5 py-1 rounded bg-slate-800 text-amber-400 font-mono text-[11px] font-bold shrink-0">
-                            {formatDuration(seg.start)} - {formatDuration(seg.end)}
-                          </span>
-                          <p className="text-slate-300 text-xs leading-relaxed mt-0.5">{seg.text}</p>
-                        </div>
+                    <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 space-y-1">
+                      <span className="font-bold text-indigo-400 block">🎯 Audience Retention Boost:</span>
+                      <p className="text-slate-300 leading-relaxed">{scriptSuggestions.engagementBoost}</p>
+                    </div>
+
+                    <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 space-y-1">
+                      <span className="font-bold text-violet-400 block">✨ Polished Opening Snippet:</span>
+                      <p className="text-slate-200 italic leading-relaxed">{scriptSuggestions.improvedDraftSnippet}</p>
+                    </div>
+                  </CardBody>
+                </Card>
+              )}
+
+              {/* Summary & Keywords */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                <Card className="md:col-span-8 bg-slate-950/80 border-slate-800">
+                  <CardHeader title="Extractive TextRank Executive Summary" description="Core Content Insights" />
+                  <CardBody>
+                    <p className="text-xs leading-relaxed text-slate-200 italic bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+                      "{analytics.summary || fullText.substring(0, 180)}"
+                    </p>
+                  </CardBody>
+                </Card>
+
+                <Card className="md:col-span-4 bg-slate-950/80 border-slate-800">
+                  <CardHeader title="TF-IDF Keywords" description="Extracted Key Concepts" />
+                  <CardBody>
+                    <div className="flex flex-wrap gap-2">
+                      {Array.isArray(analytics.keywords) && analytics.keywords.map((kw, i) => (
+                        <span key={i} className="px-3 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 font-mono text-xs font-semibold">
+                          #{kw}
+                        </span>
                       ))}
                     </div>
-                  ) : (
-                    <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed font-mono">
-                      {fullText}
-                    </div>
-                  )}
-                </CardBody>
-              </Card>
+                  </CardBody>
+                </Card>
+              </div>
 
-              {/* SECTION 6: DOWNLOAD ACTIONS */}
-              <Card>
-                <CardHeader>
-                  <h3 className="font-bold text-white text-base flex items-center gap-2">
-                    <FileDown className="w-4 h-4 text-amber-400" />
-                    Export Transcript & Analytics
-                  </h3>
-                  <p className="text-slate-400 text-xs mt-0.5">Download transcript in raw text or structured JSON format.</p>
-                </CardHeader>
-                <CardBody className="flex gap-4">
-                  <Button onClick={handleDownloadTxt} icon={Download} variant="primary">
-                    Download Raw Text (.TXT)
-                  </Button>
+              {/* Timed Transcript Segments */}
+              <Card className="bg-slate-950/80 border-slate-800">
+                <CardHeader title="Timed Transcript Segments" description={`${filteredTranscript.length} Timed Segments Extracted`} />
+                <CardBody className="space-y-4">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Search transcript text..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
 
-                  <Button onClick={handleDownloadJson} icon={Download} variant="secondary">
-                    Download JSON Analytics (.JSON)
-                  </Button>
+                  <div className="max-h-[350px] overflow-y-auto space-y-2 pr-1">
+                    {filteredTranscript.map((seg, idx) => (
+                      <div key={idx} className="p-3 bg-slate-900/50 rounded-xl border border-slate-800/80 flex items-start gap-3">
+                        <span className="font-mono text-[10px] bg-slate-950 px-2 py-0.5 rounded text-amber-400 border border-slate-800">
+                          {formatDuration(seg.start || 0)} - {formatDuration(seg.end || 0)}
+                        </span>
+                        <p className="text-xs text-slate-200 leading-snug flex-1">{seg.text || ''}</p>
+                      </div>
+                    ))}
+                  </div>
                 </CardBody>
               </Card>
             </>

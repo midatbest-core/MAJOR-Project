@@ -6,6 +6,7 @@ const {
   transcribeMedia,
   analyzeText,
   downloadTranscript,
+  generateScriptImprovementsController,
   generateTitlesController,
   generateDescriptionController,
   generateHashtagsController
@@ -15,6 +16,7 @@ router.post('/upload', upload.single('file'), uploadMedia);
 router.post('/transcribe', transcribeMedia);
 router.post('/analyze', analyzeText);
 router.get('/download/:projectId/:format', downloadTranscript);
+router.post('/improve-script', generateScriptImprovementsController);
 router.post('/generate-title', generateTitlesController);
 router.post('/generate-description', generateDescriptionController);
 router.post('/generate-hashtags', generateHashtagsController);

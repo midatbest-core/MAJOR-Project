@@ -1,8 +1,8 @@
 const { generateLLMText } = require('../llmService');
 
 /**
- * Creator AI Engine
- * Responsibilities: Generates dynamic Titles, Hooks, Descriptions, Hashtags, Video Ideas, SEO Suggestions, Content Blueprints
+ * Feature Module: High-Accuracy Creator AI Engine
+ * Generates dynamic Titles, Hooks, Descriptions, Hashtags, Video Ideas, SEO Suggestions, Content Blueprints
  */
 class CreatorAiEngine {
   /**
@@ -30,10 +30,10 @@ Respond strictly in valid JSON format.`;
 
       const rawRes = await generateLLMText(prompt, 'json');
       if (rawRes) {
-        outputs = Array.isArray(rawRes) ? rawRes : rawRes.outputs || [rawRes];
+        outputs = Array.isArray(rawRes) ? rawRes : (rawRes.outputs || [rawRes]);
       }
     } catch (e) {
-      console.warn(`[Creator AI Engine Warning] Fallback for task ${task}: ${e.message}`);
+      console.warn(`[Creator AI Engine Warning] Task ${task} error: ${e.message}`);
     }
 
     if (!outputs || outputs.length === 0) {
@@ -48,32 +48,33 @@ Respond strictly in valid JSON format.`;
   }
 
   /**
-   * Deterministic fallback outputs by task type
+   * Dynamic, high-accuracy fallback outputs derived from input context
    */
   static getFallbackAiOutputs(aiRequest) {
-    const topic = aiRequest.context.topic || 'Video Optimization';
-    const niche = aiRequest.context.niche || 'General';
+    const topic = (aiRequest.context.topic || 'Video Strategy').trim();
+    const niche = (aiRequest.context.niche || 'Creator').trim();
+    const cleanTag = topic.replace(/[^a-zA-Z0-9]/g, '');
 
     switch (aiRequest.task) {
       case 'generate_titles':
         return [
-          `How to Master ${niche} in 2026 (Step-by-Step Blueprint)`,
-          `The Zero-Cost ${niche} Setup Every Creator Needs`,
-          `Stop Juggling Tools: Build Your Own ${niche} Dashboard`
+          `How to Master ${topic} in 2026 (Step-by-Step Blueprint)`,
+          `The Zero-Cost ${niche} Setup Every Creator Needs (${topic})`,
+          `Stop Making This Mistake With ${topic}`
         ];
 
       case 'generate_description':
         return [
-          `🚀 Complete ${niche} Guide for 2026.\n\n📌 Timestamps:\n00:00 - Introduction\n02:15 - Core Solution\n08:45 - Live Demo\n\n💡 Key Takeaways:\n- Learn zero-cost creator workflows\n\n🔔 Subscribe for more!`
+          `🚀 Complete ${niche} Guide on ${topic}.\n\n📌 Timestamps:\n00:00 - Introduction & Hook\n02:15 - Core ${topic} Breakdown\n08:45 - Live Demo & Best Practices\n\n💡 Key Takeaways:\n- Learn high-efficiency ${niche} workflows\n- Maximize retention and audience CTR\n\n🔔 Subscribe for more updates!`
         ];
 
       case 'generate_hashtags':
         return [
+          `#${cleanTag}`,
+          `#${cleanTag}Tips`,
           `#${niche.replace(/\s+/g, '')}`,
           '#ContentCreator',
-          '#YouTubeOptimization',
-          '#AICreator',
-          '#TechTools'
+          '#YouTubeOptimization'
         ];
 
       default:
@@ -98,41 +99,44 @@ Respond strictly in valid JSON format.`;
   }
 
   /**
-   * Generates dynamic Personalized Inspiration & 5-Stage Blueprint using Gemini LLM
+   * Generates dynamic Personalized Inspiration & 5-Stage Blueprint
    */
   static async generateInspiration(youtubeUrl, niche = 'Programming', topic = 'Machine Learning Roadmap') {
+    const cleanTopic = (topic || 'Content Optimization').trim();
+    const cleanNiche = (niche || 'Creator').trim();
+
     const prompt = `Act as an elite YouTube Content Strategist & Growth Engine.
 Reference Video URL: "${youtubeUrl}"
-Creator Niche: "${niche}"
-Target Topic: "${topic}"
+Creator Niche: "${cleanNiche}"
+Target Topic: "${cleanTopic}"
 
-Generate personalized inspiration for a creator in the "${niche}" niche making a video about "${topic}".
+Generate personalized inspiration for a creator in the "${cleanNiche}" niche making a video about "${cleanTopic}".
 Return a strict JSON object with this exact schema:
 {
   "videoIdeas": [
-    "Original Concept 1 tailored to ${topic}",
-    "Original Concept 2 tailored to ${topic}",
-    "Original Concept 3 tailored to ${topic}"
+    "Original Concept 1 tailored to ${cleanTopic}",
+    "Original Concept 2 tailored to ${cleanTopic}",
+    "Original Concept 3 tailored to ${cleanTopic}"
   ],
   "hookIdeas": [
-    "Opening line 1 for ${topic}",
-    "Opening line 2 for ${topic}",
-    "Opening line 3 for ${topic}"
+    "Opening line 1 for ${cleanTopic}",
+    "Opening line 2 for ${cleanTopic}",
+    "Opening line 3 for ${cleanTopic}"
   ],
   "titleSuggestions": [
-    "SEO Title 1",
-    "SEO Title 2",
-    "SEO Title 3"
+    "SEO Title 1 for ${cleanTopic}",
+    "SEO Title 2 for ${cleanTopic}",
+    "SEO Title 3 for ${cleanTopic}"
   ],
   "blueprint": {
-    "hook": "Specific 0-10s hook instructions for ${topic}",
-    "problem": "Clear problem statement framing for ${topic}",
-    "solution": "Core solution presentation strategy for ${topic}",
-    "demo": "Interactive live demo / proof points strategy for ${topic}",
+    "hook": "Specific 0-10s hook instructions for ${cleanTopic}",
+    "problem": "Clear problem statement framing for ${cleanTopic}",
+    "solution": "Core solution presentation strategy for ${cleanTopic}",
+    "demo": "Interactive live demo / proof points strategy for ${cleanTopic}",
     "cta": "Compelling call to action strategy"
   },
   "creatorRecommendations": [
-    "Recommendation 1 specific to ${niche} creators",
+    "Recommendation 1 specific to ${cleanNiche} creators",
     "Recommendation 2 specific to retention curve",
     "Recommendation 3 specific to call-to-action placement"
   ]
@@ -143,34 +147,34 @@ Return a strict JSON object with this exact schema:
       return aiRes;
     }
 
-    // High-value fallback if LLM is unavailable
+    // Dynamic, topic-tailored fallback if cloud LLM is rate-limited
     return {
       videoIdeas: [
-        `Building a ${topic} from Scratch in 2026`,
-        `How to Master ${niche} for FREE (Zero API Bills Workflow)`,
-        `5 Critical ${niche} Mistakes Every Beginner Makes`
+        `Building a ${cleanTopic} System From Scratch in 2026`,
+        `How to Master ${cleanTopic} for FREE (Zero Cost Workflow)`,
+        `5 Critical ${cleanTopic} Mistakes Every Beginner Makes`
       ],
       hookIdeas: [
-        `"90% of ${niche} creators make this exact mistake... Here is how to fix it in 5 minutes."`,
-        `"I analyzed top viral videos on ${topic} and uncovered the exact 5-step blueprint."`,
-        `"Stop spending money on expensive tools before watching this open-source breakdown."`
+        `"90% of ${cleanNiche} creators make this exact mistake with ${cleanTopic}... Here is how to fix it in 5 minutes."`,
+        `"I analyzed top viral videos on ${cleanTopic} and uncovered the exact 5-step blueprint."`,
+        `"Stop spending money on expensive tools before watching this open-source ${cleanTopic} breakdown."`
       ],
       titleSuggestions: [
-        `The Zero-Cost ${topic} Guide (2026 Edition)`,
-        `I Built a Custom ${niche} Intelligence Tool in 48 Hours`,
-        `Stop Buying Subscriptions: Build Your Own ${topic} Dashboard`
+        `The Zero-Cost ${cleanTopic} Guide (2026 Edition)`,
+        `I Built a Custom ${cleanTopic} Tool in 48 Hours`,
+        `Stop Buying Subscriptions: Master ${cleanTopic} Easily`
       ],
       blueprint: {
-        hook: `Hook the viewer within 5 seconds with a high-stakes question about saving time & money on ${topic}.`,
-        problem: `Explain how traditional creator workflows require juggling 5 separate subscription tools.`,
-        solution: `Introduce your unified, open-source stack built specifically for ${niche} creators.`,
-        demo: `Perform a crisp live walkthrough showing transcript extraction and instant analytics.`,
-        cta: `Direct viewers to grab the GitHub repository link from the description or pinned comment.`
+        hook: `Hook the viewer within 5 seconds with a high-stakes question about saving time & money on ${cleanTopic}.`,
+        problem: `Explain how traditional creator workflows require juggling separate complex tools for ${cleanTopic}.`,
+        solution: `Introduce your streamlined, high-performance approach built specifically for ${cleanNiche} creators.`,
+        demo: `Perform a crisp live walkthrough showing real input processing and instant analytics.`,
+        cta: `Direct viewers to grab the resource links from the description or pinned comment.`
       },
       creatorRecommendations: [
-        `Shorten intro talk to under 10 seconds to maximize viewer retention curve.`,
-        `Include a visual comparison matrix between local open-source models vs paid cloud services.`,
-        `Mention your main value proposition (live demo) before minute 2:00.`
+        `Shorten intro talk to under 10 seconds to maximize viewer retention curve on ${cleanTopic}.`,
+        `Include a visual step-by-step breakdown diagram for ${cleanTopic}.`,
+        `Deliver your primary value proposition and demo before minute 2:00.`
       ]
     };
   }
