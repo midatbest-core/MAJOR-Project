@@ -37,6 +37,32 @@ const generateLLMText = async (prompt, format = 'text') => {
   return null;
 };
 
+/**
+ * Smart AI Transcript Summarizer:
+ * Takes raw, noisy speech-to-text transcripts and converts them into a polished 2-sentence executive summary.
+ */
+const summarizeTranscript = async (text, projectTitle = '') => {
+  if (!text || text.length < 15) return null;
+
+  const prompt = `You are an elite YouTube Content Summarizer & Senior Editor.
+Video Title: "${projectTitle || 'Untitled Video'}"
+Raw Audio Transcript:
+"${text.substring(0, 3500)}"
+
+Task: Convert this raw transcript into a crystal-clear, professional 2-sentence executive summary.
+Rules:
+1. Fix any speech-to-text grammar, spelling, or phonetic misinterpretations.
+2. Clearly articulate the main topic, core demonstration, and key takeaway.
+3. Write in clean, professional third-person English (e.g. "This video explores...", "The creator demonstrates...").
+4. Return ONLY the 2-sentence summary text without introductory conversational filler.`;
+
+  const res = await generateLLMText(prompt, 'text');
+  if (res && res.length > 25 && res.length < 500) {
+    return res.trim().replace(/^["']|["']$/g, '');
+  }
+  return null;
+};
+
 const analyzeAudienceComments = async ({ title, comments = [], niche, topic }) => {
   const commentText = comments.length > 0 ? comments.slice(0, 15).join('\n') : `Video title: ${title}`;
   
@@ -105,6 +131,7 @@ const generateHashtags = async ({ topic, keywords = [] }) => {
 
 module.exports = {
   generateLLMText,
+  summarizeTranscript,
   analyzeAudienceComments,
   generateTitles,
   generateDescription,

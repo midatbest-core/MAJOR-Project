@@ -1,6 +1,5 @@
 const { spawn } = require('child_process');
 const path = require('path');
-
 const fs = require('fs');
 
 /**
@@ -11,13 +10,9 @@ const fs = require('fs');
  */
 const runPythonScript = (scriptName, inputPayload = {}) => {
   return new Promise((resolve, reject) => {
-    let pythonExe = process.env.PYTHON_PATH;
-    
-    // Auto-detect virtualenv python if available
+    // Prioritize local project .venv python executable to ensure installed packages are loaded
     const venvPythonPath = path.join(__dirname, '..', '.venv', 'Scripts', 'python.exe');
-    if (!pythonExe && fs.existsSync(venvPythonPath)) {
-      pythonExe = venvPythonPath;
-    }
+    let pythonExe = fs.existsSync(venvPythonPath) ? venvPythonPath : process.env.PYTHON_PATH;
     if (!pythonExe) {
       pythonExe = 'python';
     }
@@ -52,7 +47,6 @@ const runPythonScript = (scriptName, inputPayload = {}) => {
           const parsed = JSON.parse(jsonMatch[0]);
           resolve(parsed);
         } else {
-          // If execution returned plain text or mock format
           resolve({ rawOutput: stdoutData.trim(), stderr: stderrData.trim() });
         }
       } catch (err) {

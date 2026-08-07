@@ -20,10 +20,13 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedExtensions = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.mp3', '.wav', '.m4a', '.aac', '.txt'];
+  const allowedExtensions = [
+    '.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.3gp',
+    '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.wma', '.txt'
+  ];
   const ext = path.extname(file.originalname).toLowerCase();
   
-  if (allowedExtensions.includes(ext)) {
+  if (allowedExtensions.includes(ext) || file.mimetype.startsWith('video/') || file.mimetype.startsWith('audio/')) {
     cb(null, true);
   } else {
     cb(new Error(`Invalid file type. Allowed formats: ${allowedExtensions.join(', ')}`), false);
@@ -33,7 +36,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: 500 * 1024 * 1024 } // 500 MB max for video demo
+  limits: { fileSize: 500 * 1024 * 1024 } // 500 MB max
 });
 
 module.exports = upload;

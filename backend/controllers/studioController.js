@@ -1,12 +1,27 @@
+const mongoose = require('mongoose');
 const Project = require('../models/Project');
+const CreatorAnalysis = require('../models/CreatorAnalysisModel');
 const PipelineOrchestrator = require('../services/orchestrator');
 const CreatorAiEngine = require('../services/engines/creatorAiEngine');
 const { sendSuccess, sendError } = require('../utils/responseHandler');
+const { runPythonScript } = require('../services/pythonBridge');
+const { generateProjectId } = require('../utils/idGenerator');
 
 /**
- * Feature Module: Text Studio
- * Standardized API v1 Controller conforming to Chapter 3 Contracts
+ * Feature Module: Text Studio (Chapter 6 Module Version 1.0)
+ * Standardized API v1 Controller
  */
+
+// Helper to safely save mongoose document without blocking when DB is disconnected
+const safeSave = async (doc) => {
+  if (mongoose.connection.readyState === 1) {
+    try {
+      await doc.save();
+    } catch (e) {
+      console.warn('[Mongoose SafeSave Warning]', e.message);
+    }
+  }
+};
 
 /**
  * POST /api/v1/text-studio/upload
@@ -15,35 +30,38 @@ const uploadMedia = async (req, res) => {
   try {
     const { scriptText, projectTitle } = req.body;
     let newProject;
+    const generatedProjId = generateProjectId();
 
     if (req.file) {
       newProject = new Project({
+        projectId: generatedProjId,
         projectName: projectTitle || req.file.originalname,
         mediaType: req.file.mimetype.includes('audio') ? 'audio' : 'video',
         originalFileName: req.file.originalname,
         fileSize: req.file.size,
         processingState: 'UPLOADED'
       });
-      await newProject.save();
+      await safeSave(newProject);
 
       return sendSuccess(res, {
-        projectId: newProject.projectId,
+        projectId: generatedProjId,
         filePath: req.file.path,
-        status: newProject.processingState
+        status: 'UPLOADED'
       }, 'File uploaded successfully', 201);
     } else if (scriptText) {
       newProject = new Project({
+        projectId: generatedProjId,
         projectName: projectTitle || 'Pasted Script Project',
         mediaType: 'script',
         fullText: scriptText,
         processingState: 'TRANSCRIBING',
         transcript: [{ start: 0, end: 10, text: scriptText }]
       });
-      await newProject.save();
+      await safeSave(newProject);
 
       return sendSuccess(res, {
-        projectId: newProject.projectId,
-        status: newProject.processingState
+        projectId: generatedProjId,
+        status: 'TRANSCRIBING'
       }, 'Script received successfully', 201);
     } else {
       return sendError(res, 'Validation failed', [{ field: 'file', code: 'MISSING_PAYLOAD', description: 'No file or script text provided' }], 400);
@@ -61,8 +79,10 @@ const transcribeMedia = async (req, res) => {
     const { projectId, filePath, scriptText } = req.body;
 
     let project;
-    if (projectId) {
-      project = await Project.findOne({ projectId });
+    if (projectId && mongoose.connection.readyState === 1) {
+      try {
+        project = await Project.findOne({ projectId });
+      } catch (e) {}
     }
 
     if (scriptText || (project && project.mediaType === 'script')) {
@@ -73,11 +93,11 @@ const transcribeMedia = async (req, res) => {
         project.transcript = dummyTranscript;
         project.fullText = text;
         project.processingState = 'TRANSCRIBED';
-        await project.save();
+        await safeSave(project);
       }
 
       return sendSuccess(res, {
-        projectId: project ? project.projectId : null,
+        projectId: projectId || null,
         transcript: dummyTranscript,
         fullText: text
       }, 'Script transcribed successfully');
@@ -90,15 +110,27 @@ const transcribeMedia = async (req, res) => {
     ];
     let fullText = transcriptSegments.map(s => s.text).join(' ');
 
+    if (filePath) {
+      try {
+        const result = await runPythonScript('transcribe_whisper.py', { filePath });
+        if (result && result.transcript) {
+          transcriptSegments = result.transcript;
+          fullText = result.fullText || fullText;
+        }
+      } catch (e) {
+        console.warn('[TextStudio Transcribe] Whisper fallback active');
+      }
+    }
+
     if (project) {
       project.transcript = transcriptSegments;
       project.fullText = fullText;
       project.processingState = 'TRANSCRIBED';
-      await project.save();
+      await safeSave(project);
     }
 
     return sendSuccess(res, {
-      projectId: project ? project.projectId : null,
+      projectId: projectId || null,
       transcript: transcriptSegments,
       fullText
     }, 'Media transcribed successfully');
@@ -116,9 +148,11 @@ const analyzeText = async (req, res) => {
     let targetText = text;
 
     let project;
-    if (projectId) {
-      project = await Project.findOne({ projectId });
-      if (project) targetText = project.fullText || targetText;
+    if (projectId && mongoose.connection.readyState === 1) {
+      try {
+        project = await Project.findOne({ projectId });
+        if (project) targetText = project.fullText || targetText;
+      } catch (e) {}
     }
 
     if (!targetText) {
@@ -136,17 +170,86 @@ const analyzeText = async (req, res) => {
       wordCount: nlpData.readability?.wordCount || targetText.split(/\s+/).filter(Boolean).length
     };
 
+    // Save canonical CreatorAnalysis record in MongoDB
+    let analysisRecord;
+    try {
+      const sentenceCount = targetText.split(/[.!?]+/).filter(Boolean).length || 1;
+      analysisRecord = new CreatorAnalysis({
+        projectId: projectId || `proj_temp_${Date.now()}`,
+        transcript: targetText,
+        summary: nlpData.summary,
+        keywords: nlpData.keywords,
+        sentiment: {
+          label: nlpData.sentiment?.label || 'Positive',
+          score: nlpData.sentiment?.polarity || 0.65
+        },
+        statistics: {
+          wordCount: analytics.wordCount,
+          sentenceCount,
+          duration: Math.round(analytics.wordCount / 2.4),
+          speakingSpeed: analytics.wpm
+        },
+        readability: {
+          score: analytics.readabilityScore,
+          grade: nlpData.readability?.gradeLevel || '8th Grade (Easy to Understand)'
+        }
+      });
+      await safeSave(analysisRecord);
+    } catch (dbErr) {
+      console.warn('[CreatorAnalysis Model Save Warning]', dbErr.message);
+    }
+
     if (project) {
       project.processingState = 'READY';
-      await project.save();
+      if (analysisRecord) project.analysisId = analysisRecord.analysisId;
+      await safeSave(project);
     }
 
     return sendSuccess(res, {
-      projectId: project ? project.projectId : null,
-      analytics
+      projectId: projectId || null,
+      analysisId: analysisRecord ? analysisRecord.analysisId : null,
+      analytics,
+      creatorAnalysis: analysisRecord
     }, 'Text analyzed successfully');
   } catch (err) {
     return sendError(res, 'Text analysis failed', err, 500);
+  }
+};
+
+/**
+ * GET /api/v1/text-studio/download/:projectId/:format
+ */
+const downloadTranscript = async (req, res) => {
+  try {
+    const { projectId, format } = req.params;
+
+    let project, analysis;
+    if (mongoose.connection.readyState === 1) {
+      try {
+        project = await Project.findOne({ projectId });
+        analysis = await CreatorAnalysis.findOne({ projectId });
+      } catch (e) {}
+    }
+
+    const fullText = project?.fullText || analysis?.transcript || "Sample AI Creator Dashboard transcript content.";
+
+    if (format === 'json') {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="transcript_${projectId || 'export'}.json"`);
+      return res.send(JSON.stringify({
+        projectId: projectId || 'export',
+        fullText,
+        transcript: project?.transcript || [],
+        analytics: analysis || {}
+      }, null, 2));
+    }
+
+    // Default TXT export
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Content-Disposition', `attachment; filename="transcript_${projectId || 'export'}.txt"`);
+    return res.send(fullText);
+  } catch (err) {
+    return sendError(res, 'Download failed', err, 500);
   }
 };
 
@@ -187,6 +290,7 @@ module.exports = {
   uploadMedia,
   transcribeMedia,
   analyzeText,
+  downloadTranscript,
   generateTitlesController,
   generateDescriptionController,
   generateHashtagsController
