@@ -122,7 +122,7 @@ const TimelineEditor = ({
 
               return (
                 <div
-                  key={seg.id || idx}
+                  key={seg.id || `timeline_seg_${idx}`}
                   onClick={() => onSelectSegment(idx)}
                   onDoubleClick={() => handleStartEdit(seg)}
                   className={`absolute rounded-xl border p-2 flex flex-col justify-between transition-all duration-150 shadow-md group ${

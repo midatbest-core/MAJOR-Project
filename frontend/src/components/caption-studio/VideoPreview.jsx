@@ -7,7 +7,9 @@ import {
   EyeOff, 
   Smartphone, 
   Monitor, 
-  Square
+  Square,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 
 /**
@@ -29,11 +31,15 @@ const VideoPreview = ({
 }) => {
   const videoRef = useRef(null);
   const [showSafeArea, setShowSafeArea] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(1.0);
 
   // Sync play/pause with video element
   useEffect(() => {
     if (videoRef.current) {
       if (isPlaying) {
+        videoRef.current.muted = isMuted;
+        videoRef.current.volume = volume;
         const playPromise = videoRef.current.play();
         if (playPromise !== undefined) {
           playPromise.catch(err => {
@@ -44,7 +50,7 @@ const VideoPreview = ({
         videoRef.current.pause();
       }
     }
-  }, [isPlaying]);
+  }, [isPlaying, isMuted, volume]);
 
   // Sync current time with video element
   useEffect(() => {
@@ -52,6 +58,14 @@ const VideoPreview = ({
       videoRef.current.currentTime = currentTime;
     }
   }, [currentTime]);
+
+  // Sync audio volume & mute state
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted;
+      videoRef.current.volume = volume;
+    }
+  }, [isMuted, volume]);
 
   const aspectClasses = {
     '9:16': 'w-[300px] h-[533px] sm:w-[340px] sm:h-[604px]',
@@ -109,7 +123,7 @@ const VideoPreview = ({
       {/* Top Preview Controls */}
       <div className="w-full flex items-center justify-between mb-3 text-xs text-slate-400">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-slate-200">Canvas Live Preview</span>
+          <span className="font-semibold text-emerald-400">1:1 Burn Export Preview</span>
           <span className="bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full font-mono text-[10px]">
             {aspectRatio} Vertical Default
           </span>
@@ -228,6 +242,31 @@ const VideoPreview = ({
             >
               {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
             </button>
+
+            {/* Audio Volume & Mute Controls */}
+            <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-2 py-1 rounded-lg">
+              <button
+                onClick={() => setIsMuted(!isMuted)}
+                className="text-slate-400 hover:text-slate-200 transition"
+                title={isMuted ? "Unmute Audio" : "Mute Audio"}
+              >
+                {isMuted || volume === 0 ? <VolumeX className="w-3.5 h-3.5 text-rose-400" /> : <Volume2 className="w-3.5 h-3.5 text-indigo-400" />}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={isMuted ? 0 : volume}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setVolume(val);
+                  if (val > 0) setIsMuted(false);
+                }}
+                className="w-14 accent-indigo-500 bg-slate-800 h-1 rounded-lg cursor-pointer"
+                title="Adjust Audio Volume"
+              />
+            </div>
           </div>
           <span>{formatTime(duration)}</span>
         </div>

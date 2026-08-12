@@ -11,6 +11,8 @@ const { sendSuccess, sendError } = require('../utils/responseHandler');
  * Serves direct file binary downloads for .srt, .vtt, .txt, .json, and .mp4 burned video exports.
  */
 
+const mongoose = require('mongoose');
+
 /**
  * POST /api/v1/caption-studio/render
  */
@@ -19,17 +21,22 @@ const renderCaptions = async (req, res) => {
     const { projectId, transcript, subtitleStyle, exportFormat, videoPath } = req.body;
     let targetTranscript = transcript;
 
-    if (projectId) {
-      const project = await Project.findOne({ projectId });
-      if (project && (!targetTranscript || targetTranscript.length === 0)) {
-        targetTranscript = project.transcript;
+    // Only query MongoDB if targetTranscript was not provided in request body and DB is connected
+    if ((!targetTranscript || targetTranscript.length === 0) && projectId && mongoose.connection.readyState === 1) {
+      try {
+        const project = await Project.findOne({ projectId }).maxTimeMS(2000);
+        if (project && project.transcript) {
+          targetTranscript = project.transcript;
+        }
+      } catch (dbErr) {
+        console.warn('[Caption Controller DB Notice]', dbErr.message);
       }
     }
 
     if (!targetTranscript || targetTranscript.length === 0) {
       targetTranscript = [
-        { id: 1, start: 0, end: 4.5, text: "Welcome to Caption Studio! Create CapCut & Instagram styled captions." },
-        { id: 2, start: 4.5, end: 9.2, text: "Customize font family, stroke borders, background boxes, drop shadows, and positions." }
+        { id: 'default_1', start: 0, end: 4.5, text: "Welcome to Caption Studio! Create CapCut & Instagram styled captions." },
+        { id: 'default_2', start: 4.5, end: 9.2, text: "Customize font family, stroke borders, background boxes, drop shadows, and positions." }
       ];
     }
 
@@ -37,26 +44,26 @@ const renderCaptions = async (req, res) => {
     const vttContent = RenderingEngine.generateVttString(targetTranscript);
 
     if (exportFormat === 'srt') {
-      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="captions.srt"');
       return res.send(srtContent);
     }
 
     if (exportFormat === 'vtt') {
-      res.setHeader('Content-Type', 'text/vtt');
+      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="captions.vtt"');
       return res.send(vttContent);
     }
 
     if (exportFormat === 'txt') {
       const txtContent = targetTranscript.map(s => s.text).join('\n');
-      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="transcript.txt"');
       return res.send(txtContent);
     }
 
     if (exportFormat === 'json') {
-      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="captions.json"');
       return res.send(JSON.stringify(targetTranscript, null, 2));
     }
@@ -66,14 +73,23 @@ const renderCaptions = async (req, res) => {
         let sourceFile = videoPath;
         const uploadsDir = path.join(__dirname, '..', 'uploads');
 
-        if (!sourceFile || !fs.existsSync(sourceFile)) {
-          if (projectId) {
-            const proj = await Project.findOne({ projectId });
+        if (sourceFile) {
+          if (!path.isAbsolute(sourceFile)) {
+            const uploadCandidate = path.join(uploadsDir, path.basename(sourceFile));
+            if (fs.existsSync(uploadCandidate)) {
+              sourceFile = uploadCandidate;
+            }
+          }
+        }
+
+        if ((!sourceFile || !fs.existsSync(sourceFile)) && projectId && mongoose.connection.readyState === 1) {
+          try {
+            const proj = await Project.findOne({ projectId }).maxTimeMS(2000);
             if (proj && proj.originalFileName) {
               const uploadPath = path.join(uploadsDir, proj.originalFileName);
               if (fs.existsSync(uploadPath)) sourceFile = uploadPath;
             }
-          }
+          } catch (e) {}
         }
 
         if (!sourceFile || !fs.existsSync(sourceFile)) {
@@ -100,8 +116,8 @@ const renderCaptions = async (req, res) => {
         console.warn('[Caption Render Notice]', renderErr.message);
       }
 
-      // Fallback: If no local video file exists on host, return timed captions SRT file as downloadable attachment
-      res.setHeader('Content-Type', 'video/mp4');
+      // Fallback: If no local video file exists on host, return timed captions SRT file with text/plain header
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="captioned_subtitles.srt"');
       return res.send(srtContent);
     }

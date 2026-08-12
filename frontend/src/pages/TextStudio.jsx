@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import apiClient from '../services/apiClient';
 import SectionHeader from '../shared/SectionHeader';
@@ -37,6 +38,7 @@ import {
 } from 'lucide-react';
 
 const TextStudio = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('input');
 
   // Input states
@@ -101,6 +103,7 @@ const TextStudio = () => {
     try {
       let currentProjectId = null;
       let uploadedFilePath = '';
+      let serverMediaUrl = '';
 
       if (inputType === 'video' || inputType === 'audio') {
         setPipelineStep(1);
@@ -113,6 +116,7 @@ const TextStudio = () => {
         const uploadRes = await apiClient.post('/text-studio/upload', formData);
         currentProjectId = uploadRes?.data?.data?.projectId || `proj_${Date.now()}`;
         uploadedFilePath = uploadRes?.data?.data?.filePath || '';
+        serverMediaUrl = uploadRes?.data?.data?.mediaUrl || '';
       } else {
         setPipelineStep(1);
         setStepStatus('Ingesting script text payload...');
@@ -166,9 +170,11 @@ const TextStudio = () => {
 
       // Safely store active project media & transcript so Caption Studio can import it when requested
       try {
-        const createdVideoUrl = (file && typeof URL !== 'undefined' && URL.createObjectURL) 
-          ? URL.createObjectURL(file) 
-          : null;
+        const createdVideoUrl = serverMediaUrl 
+          ? `http://localhost:5000${serverMediaUrl}` 
+          : ((file && typeof URL !== 'undefined' && URL.createObjectURL) 
+            ? URL.createObjectURL(file) 
+            : null);
           
         localStorage.setItem('activeStudioProject', JSON.stringify({
           projectId: currentProjectId,
@@ -270,7 +276,7 @@ const TextStudio = () => {
         {analytics && (
           <div className="flex items-center gap-2">
             <button
-              onClick={() => window.location.href = '/caption-studio'}
+              onClick={() => navigate('/caption-studio')}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-xs font-bold hover:opacity-90 transition shadow-lg shadow-indigo-600/30"
             >
               <Subtitles className="w-4 h-4 text-indigo-200" />
@@ -493,8 +499,22 @@ const TextStudio = () => {
               {/* Summary & Keywords */}
               <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                 <Card className="md:col-span-8 bg-slate-950/80 border-slate-800">
-                  <CardHeader title="Extractive TextRank Executive Summary" description="Core Content Insights" />
-                  <CardBody>
+                  <div className="flex items-center justify-between px-5 pt-5 pb-1 border-b border-slate-800/60">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-100">Extractive TextRank Executive Summary</h3>
+                      <p className="text-[11px] text-slate-400">Core Content Insights & Key Takeaways</p>
+                    </div>
+                    <button
+                      onClick={handleGetScriptImprovements}
+                      disabled={loadingSuggestions}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-medium text-xs hover:opacity-90 transition shadow-lg shadow-indigo-600/30"
+                      title="Generate actionable AI copywriting and script retention tips"
+                    >
+                      {loadingSuggestions ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-indigo-200" />}
+                      <span>✨ Improve Script with AI</span>
+                    </button>
+                  </div>
+                  <CardBody className="pt-3">
                     <p className="text-xs leading-relaxed text-slate-200 italic bg-slate-900/60 p-4 rounded-xl border border-slate-800">
                       "{analytics.summary || fullText.substring(0, 180)}"
                     </p>

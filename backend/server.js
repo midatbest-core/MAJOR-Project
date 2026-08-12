@@ -21,9 +21,9 @@ connectDB();
 
 // Periodic Storage Cleanup
 setInterval(() => {
-  cleanupDirectory(path.join(__dirname, 'uploads'), 3600000);
-  cleanupDirectory(path.join(__dirname, 'temp'), 3600000);
-}, 1800000);
+  cleanupDirectory(path.join(__dirname, 'uploads'), 86400000);
+  cleanupDirectory(path.join(__dirname, 'temp'), 86400000);
+}, 3600000);
 
 // Start Server
 const server = app.listen(environment.port, () => {

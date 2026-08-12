@@ -43,11 +43,47 @@ const CaptionList = ({
     }
   };
 
+  // Helper: AI Contextual Emoji Generator matching sentence topics & sentiment
+  const getContextualAiEmojis = (text) => {
+    if (!text || typeof text !== 'string') return '✨';
+    const lower = text.toLowerCase();
+    const emojis = [];
+
+    const mappings = [
+      { keywords: ['welcome', 'hello', 'hi', 'hey', 'intro', 'start', 'greet'], emojis: ['👋', '✨', '🎉'] },
+      { keywords: ['video', 'studio', 'caption', 'subtitle', 'film', 'movie', 'record', 'watch', 'view'], emojis: ['🎬', '🎥', '📺'] },
+      { keywords: ['style', 'design', 'custom', 'font', 'color', 'background', 'pretty', 'cool', 'art'], emojis: ['🎨', '💎', '✨'] },
+      { keywords: ['create', 'make', 'build', 'render', 'generate', 'magic', 'ai', 'tech', 'code'], emojis: ['⚡', '🤖', '🚀'] },
+      { keywords: ['fast', 'speed', 'quick', 'easy', 'instant', 'rapid', 'run', 'fly'], emojis: ['⚡', '🏃‍♂️', '💨'] },
+      { keywords: ['money', 'cash', 'dollar', 'rich', 'profit', 'earn', 'sale', 'business', 'win', 'crypto'], emojis: ['💰', '💵', '📈'] },
+      { keywords: ['love', 'like', 'great', 'awesome', 'best', 'fire', 'lit', 'amazing', 'perfect', 'good'], emojis: ['🔥', '❤️', '🌟'] },
+      { keywords: ['warning', 'stop', 'error', 'danger', 'alert', 'important', 'notice', 'careful'], emojis: ['⚠️', '🚨', '❗'] },
+      { keywords: ['question', 'why', 'what', 'how', 'think', 'idea', 'mind', 'wonder'], emojis: ['💡', '❓', '🤔'] },
+      { keywords: ['time', 'clock', 'wait', 'now', 'today', 'future', 'hour'], emojis: ['⏳', '⏱️', '📅'] },
+      { keywords: ['music', 'sound', 'audio', 'song', 'listen', 'speak', 'voice', 'hear'], emojis: ['🎧', '🎵', '🎙️'] },
+      { keywords: ['winner', 'victory', 'trophy', 'top', 'king', 'queen', 'champ'], emojis: ['🏆', '🥇', '👑'] }
+    ];
+
+    for (const map of mappings) {
+      if (map.keywords.some(k => lower.includes(k))) {
+        emojis.push(...map.emojis);
+      }
+    }
+
+    if (emojis.length === 0) {
+      if (lower.length > 30) emojis.push('✨', '🚀');
+      else emojis.push('🔥', '💡');
+    }
+
+    const unique = [...new Set(emojis)];
+    return unique.slice(0, 2).join(' ');
+  };
+
   // AI Micro-Assistant Action Handlers (local micro-generators)
   const handleAiTransform = (index, action) => {
     setAiLoading(`${index}-${action}`);
     const seg = segments[index];
-    let newText = seg.text;
+    let newText = seg.text || '';
 
     setTimeout(() => {
       switch (action) {
@@ -55,7 +91,10 @@ const CaptionList = ({
           newText = newText.toUpperCase();
           break;
         case 'emojis':
-          newText = `${newText} 🔥🚀`;
+          // Clean existing trailing emojis before appending fresh contextual AI emojis
+          const cleanText = newText.replace(/[\u1F600-\u1F64F\u1F300-\u1F5FF\u1F680-\u1F6FF\u1F700-\u1F77F\u2600-\u26FF\u2700-\u27BF]/g, '').trim();
+          const contextualEmojis = getContextualAiEmojis(cleanText);
+          newText = `${cleanText} ${contextualEmojis}`.trim();
           break;
         case 'punchier':
           newText = newText.replace(/very /gi, '').replace(/really /gi, '').replace(/basically /gi, '');
@@ -122,7 +161,7 @@ const CaptionList = ({
 
           return (
             <div
-              key={seg.id || idx}
+              key={seg.id || `seg_${idx}`}
               onClick={() => onSelectSegment(idx)}
               className={`p-3 rounded-xl border transition-all duration-150 flex flex-col gap-2 ${
                 isActive
@@ -195,11 +234,12 @@ const CaptionList = ({
 
               {/* Inline Editable Text Area */}
               {editingId === seg.id ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                   <textarea
                     rows={2}
                     value={editingText}
                     onChange={(e) => setEditingText(e.target.value)}
+                    onBlur={() => saveInlineEdit(seg.id)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();

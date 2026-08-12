@@ -30,6 +30,7 @@ import StylePanel from '../components/caption-studio/StylePanel';
  */
 const CaptionStudio = () => {
   const fileInputRef = useRef(null);
+  const srtFileInputRef = useRef(null);
 
   // Caption Typography & Style State
   const [style, setStyle] = useState({
@@ -49,14 +50,27 @@ const CaptionStudio = () => {
   // Media & Video State
   const [videoUrl, setVideoUrl] = useState(null);
   const [mediaFile, setMediaFile] = useState(null);
+  const [serverVideoPath, setServerVideoPath] = useState(null);
   const [projectId, setProjectId] = useState(null);
   const [transcribing, setTranscribing] = useState(false);
+  const [selectedGranularity, setSelectedGranularity] = useState('3-4');
 
-  // Subtitle segments
-  const [segments, setSegments] = useState([
-    { id: 1, start: 0.0, end: 4.5, text: "Welcome to Caption Studio! Create CapCut & Instagram styled captions." },
-    { id: 2, start: 4.5, end: 9.2, text: "Customize font family, stroke borders, background boxes, drop shadows, and positions." },
-    { id: 3, start: 9.2, end: 15.0, text: "Render your final video with hardcoded subtitles using FFmpeg locally." }
+  // Helper function to guarantee every segment has a unique, robust ID and clean numeric timestamps
+  const normalizeSegments = (rawSegments) => {
+    if (!Array.isArray(rawSegments)) return [];
+    return rawSegments.map((seg, idx) => ({
+      id: seg.id ? String(seg.id) : `seg_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
+      start: typeof seg.start === 'number' ? roundTwo(seg.start) : (parseFloat(seg.start) || 0),
+      end: typeof seg.end === 'number' ? roundTwo(seg.end) : (parseFloat(seg.end) || 4.0),
+      text: seg.text || ''
+    }));
+  };
+
+  // Subtitle segments (Fresh state on reload as requested by user)
+  const [segments, setSegments] = useState(() => [
+    { id: 'seg_1', start: 0.0, end: 4.5, text: "Welcome to Caption Studio! Create CapCut & Instagram styled captions." },
+    { id: 'seg_2', start: 4.5, end: 9.2, text: "Customize font family, stroke borders, background boxes, drop shadows, and positions." },
+    { id: 'seg_3', start: 9.2, end: 15.0, text: "Render your final video with hardcoded subtitles using FFmpeg locally." }
   ]);
 
   const [activeSegIndex, setActiveSegIndex] = useState(0);
@@ -75,32 +89,148 @@ const CaptionStudio = () => {
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [showSuggestionsPanel, setShowSuggestionsPanel] = useState(false);
 
-  // Auto-import project media & transcript from Text Studio if active in localStorage
-  useEffect(() => {
-    try {
-      const savedProject = localStorage.getItem('activeStudioProject');
-      if (savedProject) {
-        const parsed = JSON.parse(savedProject);
-        if (parsed.transcript && parsed.transcript.length > 0) {
-          setSegments(parsed.transcript);
-          setHistory([parsed.transcript]);
-        }
-        if (parsed.videoUrl && !parsed.videoUrl.startsWith('blob:')) {
-          setVideoUrl(parsed.videoUrl);
-        }
-        if (parsed.projectId) setProjectId(parsed.projectId);
-      }
-    } catch (e) {}
-  }, []);
+  // Parse timed SRT or VTT files into subtitle segments
+  const parseSrtOrVtt = (content) => {
+    const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    const parsedSegments = [];
+    let currentSeg = null;
 
-  // Handlers for media upload & Text Studio project import
-  const handleMediaUpload = (e) => {
+    const timeRegex = /(?:(\d+):)?(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(?:(\d+):)?(\d{2}):(\d{2})[,.](\d{3})/;
+
+    const parseTimeSeconds = (h, m, s, ms) => {
+      const hours = parseInt(h || '0', 10);
+      const minutes = parseInt(m || '0', 10);
+      const seconds = parseInt(s || '0', 10);
+      const milliseconds = parseInt(ms || '0', 10);
+      return roundTwo(hours * 3600 + minutes * 60 + seconds + milliseconds / 1000);
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || line.toUpperCase().startsWith('WEBVTT')) continue;
+
+      const match = line.match(timeRegex);
+      if (match) {
+        if (currentSeg && currentSeg.text) {
+          parsedSegments.push(currentSeg);
+        }
+        const start = parseTimeSeconds(match[1], match[2], match[3], match[4]);
+        const end = parseTimeSeconds(match[5], match[6], match[7], match[8]);
+        currentSeg = {
+          id: `srt_${Date.now()}_${parsedSegments.length}_${Math.random().toString(36).substr(2, 4)}`,
+          start,
+          end,
+          text: ''
+        };
+      } else if (currentSeg && !/^\d+$/.test(line)) {
+        currentSeg.text = currentSeg.text ? `${currentSeg.text} ${line}` : line;
+      }
+    }
+
+    if (currentSeg && currentSeg.text) {
+      parsedSegments.push(currentSeg);
+    }
+
+    return normalizeSegments(parsedSegments);
+  };
+
+  // Re-segment transcript based on chosen word length or sentence boundaries
+  const handleBreakTranscript = (granularity, sourceSegments = null) => {
+    const targetSegments = sourceSegments || segments;
+    setSelectedGranularity(granularity);
+    if (!targetSegments || targetSegments.length === 0) return;
+
+    const fullText = targetSegments.map(s => s.text).join(' ');
+    const firstStart = targetSegments[0].start || 0;
+    const lastEnd = targetSegments[targetSegments.length - 1].end || 15;
+    const totalDuration = Math.max(1, lastEnd - firstStart);
+
+    let chunks = [];
+
+    if (granularity === 'sentence') {
+      const matches = fullText.match(/[^.!?]+[.!?]+/g) || [fullText];
+      chunks = matches.map(s => s.trim()).filter(Boolean);
+    } else {
+      const words = fullText.trim().split(/\s+/).filter(Boolean);
+      const chunkSize = granularity === '1-2' ? 2 : 4;
+      for (let i = 0; i < words.length; i += chunkSize) {
+        chunks.push(words.slice(i, i + chunkSize).join(' '));
+      }
+    }
+
+    if (chunks.length === 0) return;
+
+    const totalWords = fullText.trim().split(/\s+/).filter(Boolean).length || 1;
+    let currStart = firstStart;
+
+    const resegmented = chunks.map((textChunk, idx) => {
+      const wordCount = textChunk.trim().split(/\s+/).filter(Boolean).length || 1;
+      const chunkDur = roundTwo((wordCount / totalWords) * totalDuration);
+      const end = idx === chunks.length - 1 ? lastEnd : roundTwo(currStart + Math.max(0.6, chunkDur));
+      const seg = {
+        id: `break_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 4)}`,
+        start: currStart,
+        end: end,
+        text: textChunk
+      };
+      currStart = end;
+      return seg;
+    });
+
+    const normalized = normalizeSegments(resegmented);
+    setSegments(normalized);
+    pushHistory(normalized);
+    setRenderMessage(`Captions re-segmented into ${granularity === 'sentence' ? 'full sentences' : granularity + ' words per subtitle'}!`);
+  };
+
+  // Handlers for direct media upload
+  const handleMediaUpload = async (e) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setMediaFile(file);
       const blobUrl = URL.createObjectURL(file);
       setVideoUrl(blobUrl);
-      setRenderMessage(`Video loaded: ${file.name}. Click 'Auto-Transcribe with Whisper' or edit captions below.`);
+      setRenderMessage(`Video selected: ${file.name}. Uploading media for live preview & transcription...`);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('projectTitle', file.name);
+
+        const uploadRes = await axios.post('/api/v1/text-studio/upload', formData);
+        const { projectId: newProjId, filePath, mediaUrl: serverMediaUrl } = uploadRes.data.data;
+        setProjectId(newProjId);
+        setServerVideoPath(filePath);
+        if (serverMediaUrl) setVideoUrl(`http://localhost:5000${serverMediaUrl}`);
+        setRenderMessage(`Video '${file.name}' ready! Click 'Quick Subtitles (Whisper)' to transcribe immediately.`);
+      } catch (err) {
+        console.warn('Direct upload fallback:', err.message);
+        setRenderMessage(`Video loaded locally for preview. Click 'Quick Subtitles (Whisper)' to transcribe.`);
+      }
+    }
+  };
+
+  // Handle Timed SRT / VTT Subtitle File Import
+  const handleSrtFileUpload = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+
+      reader.onload = (event) => {
+        const content = event.target.result;
+        const parsed = parseSrtOrVtt(content);
+        if (parsed && parsed.length > 0) {
+          setSegments(parsed);
+          pushHistory(parsed);
+          setActiveSegIndex(0);
+          setCurrentTime(parsed[0].start);
+          setRenderMessage(`Imported ${parsed.length} timed subtitles from ${file.name}!`);
+        } else {
+          setRenderMessage(`Could not parse timed subtitles from ${file.name}. Ensure valid SRT/VTT format.`);
+        }
+      };
+
+      reader.readAsText(file);
     }
   };
 
@@ -110,10 +240,11 @@ const CaptionStudio = () => {
       if (savedProject) {
         const parsed = JSON.parse(savedProject);
         if (parsed.transcript && parsed.transcript.length > 0) {
-          setSegments(parsed.transcript);
-          pushHistory(parsed.transcript);
+          const normalized = normalizeSegments(parsed.transcript);
+          setSegments(normalized);
+          pushHistory(normalized);
         }
-        if (parsed.videoUrl && !parsed.videoUrl.startsWith('blob:')) {
+        if (parsed.videoUrl) {
           setVideoUrl(parsed.videoUrl);
         }
         if (parsed.projectId) setProjectId(parsed.projectId);
@@ -126,40 +257,53 @@ const CaptionStudio = () => {
     }
   };
 
-  // 1-Click Auto-Transcribe with local Whisper engine
+  // 1-Click Auto-Transcribe with local Whisper engine (Quick Subtitles)
   const handleAutoTranscribe = async () => {
-    if (!mediaFile) {
-      setRenderMessage("Please upload a video/audio file first to auto-transcribe.");
+    if (!mediaFile && !serverVideoPath) {
+      setRenderMessage("Please upload a video file first to auto-transcribe.");
       return;
     }
 
     setTranscribing(true);
-    setRenderMessage("Transcribing audio using local Whisper speech-to-text...");
+    setRenderMessage("Generating quick subtitles using local Whisper engine...");
 
     try {
-      const formData = new FormData();
-      formData.append('file', mediaFile);
-      formData.append('projectTitle', mediaFile.name);
+      let activePath = serverVideoPath;
+      let activeProjId = projectId;
 
-      const uploadRes = await axios.post('/api/v1/text-studio/upload', formData);
-      const { projectId: newProjId, filePath, mediaUrl: serverMediaUrl } = uploadRes.data.data;
-      setProjectId(newProjId);
-      if (serverMediaUrl) setVideoUrl(`http://localhost:5000${serverMediaUrl}`);
+      if (!activePath && mediaFile) {
+        const formData = new FormData();
+        formData.append('file', mediaFile);
+        formData.append('projectTitle', mediaFile.name);
+
+        const uploadRes = await axios.post('/api/v1/text-studio/upload', formData);
+        const data = uploadRes.data.data;
+        activeProjId = data.projectId;
+        activePath = data.filePath;
+        setProjectId(activeProjId);
+        setServerVideoPath(activePath);
+        if (data.mediaUrl) setVideoUrl(`http://localhost:5000${data.mediaUrl}`);
+      }
 
       const transcribeRes = await axios.post('/api/v1/text-studio/transcribe', {
-        projectId: newProjId,
-        filePath
+        projectId: activeProjId,
+        filePath: activePath
       });
 
       const newTranscript = transcribeRes.data.data.transcript;
       if (newTranscript && newTranscript.length > 0) {
-        setSegments(newTranscript);
-        pushHistory(newTranscript);
-        setRenderMessage("Speech transcribed using Whisper! Captions synced to timeline.");
+        const normalized = normalizeSegments(newTranscript);
+        if (selectedGranularity && selectedGranularity !== 'sentence') {
+          handleBreakTranscript(selectedGranularity, normalized);
+        } else {
+          setSegments(normalized);
+          pushHistory(normalized);
+        }
+        setRenderMessage("Quick subtitles generated! Synced to preview and timeline.");
       }
     } catch (err) {
       console.error('Auto-transcription error', err);
-      setRenderMessage("Transcription fallback active. Captions ready for editing.");
+      setRenderMessage("Transcription fallback active. You can double click to edit captions manually.");
     } finally {
       setTranscribing(false);
     }
@@ -197,45 +341,106 @@ const CaptionStudio = () => {
 
   const handleUndo = () => {
     if (historyStep > 0) {
-      setHistoryStep(historyStep - 1);
-      setSegments(history[historyStep - 1]);
+      const prevStep = historyStep - 1;
+      setHistoryStep(prevStep);
+      setSegments(history[prevStep]);
+      setActiveSegIndex(prev => Math.min(prev, history[prevStep].length - 1));
     }
   };
 
   const handleRedo = () => {
     if (historyStep < history.length - 1) {
-      setHistoryStep(historyStep + 1);
-      setSegments(history[historyStep + 1]);
+      const nextStep = historyStep + 1;
+      setHistoryStep(nextStep);
+      setSegments(history[nextStep]);
+      setActiveSegIndex(prev => Math.min(prev, history[nextStep].length - 1));
     }
   };
 
   // Segment Handlers
   const handleUpdateSegment = (id, field, value) => {
-    const updated = segments.map(seg => seg.id === id ? { ...seg, [field]: value } : seg);
+    if (id === undefined || id === null) return;
+    const targetId = String(id);
+    const updated = segments.map(seg => {
+      if (String(seg.id) === targetId) {
+        let newValue = value;
+        if (field === 'start') {
+          newValue = parseFloat(value);
+          if (isNaN(newValue)) newValue = 0;
+          newValue = roundTwo(newValue);
+          if (newValue >= seg.end) {
+            newValue = roundTwo(Math.max(0, seg.end - 0.1));
+          }
+        } else if (field === 'end') {
+          newValue = parseFloat(value);
+          if (isNaN(newValue)) newValue = 0;
+          newValue = roundTwo(newValue);
+          if (newValue <= seg.start) {
+            newValue = roundTwo(seg.start + 0.1);
+          }
+        }
+        return { ...seg, [field]: newValue };
+      }
+      return seg;
+    });
     setSegments(updated);
     pushHistory(updated);
   };
 
   const handleAddSegment = () => {
-    const lastSeg = segments[segments.length - 1];
-    const newStart = lastSeg ? lastSeg.end : 0;
-    const newSeg = {
-      id: Date.now(),
-      start: roundTwo(newStart),
-      end: roundTwo(newStart + 4.0),
-      text: "New styled subtitle segment..."
-    };
-    const updated = [...segments, newSeg];
+    let updated;
+    let newIndex;
+
+    if (segments.length === 0) {
+      const newSeg = {
+        id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        start: 0.0,
+        end: 4.0,
+        text: "New styled subtitle segment..."
+      };
+      updated = [newSeg];
+      newIndex = 0;
+    } else {
+      const targetIdx = (activeSegIndex >= 0 && activeSegIndex < segments.length)
+        ? activeSegIndex
+        : segments.length - 1;
+
+      const activeSeg = segments[targetIdx];
+      const newStart = roundTwo(activeSeg.end);
+      const nextSeg = segments[targetIdx + 1];
+      let newEnd = roundTwo(newStart + 3.5);
+
+      if (nextSeg && nextSeg.start > newStart) {
+        newEnd = roundTwo(Math.min(newStart + 3.5, nextSeg.start));
+        if (newEnd <= newStart) newEnd = roundTwo(newStart + 0.5);
+      }
+
+      const newSeg = {
+        id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        start: newStart,
+        end: newEnd,
+        text: "New styled subtitle segment..."
+      };
+
+      updated = [...segments.slice(0, targetIdx + 1), newSeg, ...segments.slice(targetIdx + 1)];
+      newIndex = targetIdx + 1;
+    }
+
     setSegments(updated);
-    setActiveSegIndex(segments.length);
+    setActiveSegIndex(newIndex);
+    if (updated[newIndex]) {
+      setCurrentTime(updated[newIndex].start);
+    }
     pushHistory(updated);
   };
 
   const handleDeleteSegment = (id) => {
     if (segments.length <= 1) return;
-    const updated = segments.filter(seg => seg.id !== id);
+    const targetId = String(id);
+    const updated = segments.filter(seg => String(seg.id) !== targetId);
     setSegments(updated);
-    setActiveSegIndex(Math.max(0, activeSegIndex - 1));
+    const newActiveIndex = Math.min(activeSegIndex, updated.length - 1);
+    setActiveSegIndex(Math.max(0, newActiveIndex));
     pushHistory(updated);
   };
 
@@ -248,7 +453,7 @@ const CaptionStudio = () => {
       id: curr.id,
       start: curr.start,
       end: next.end,
-      text: `${curr.text} ${next.text}`
+      text: `${curr.text} ${next.text}`.trim()
     };
 
     const updated = [...segments];
@@ -260,9 +465,10 @@ const CaptionStudio = () => {
 
   const handleSplitSubtitle = (index) => {
     const seg = segments[index];
+    if (!seg) return;
     const midTime = roundTwo(seg.start + (seg.end - seg.start) / 2);
-    const words = (seg.text || '').split(' ');
-    const halfLen = Math.ceil(words.length / 2);
+    const words = (seg.text || '').trim().split(/\s+/).filter(Boolean);
+    const halfLen = Math.max(1, Math.ceil(words.length / 2));
 
     const seg1 = {
       id: seg.id,
@@ -272,7 +478,7 @@ const CaptionStudio = () => {
     };
 
     const seg2 = {
-      id: Date.now(),
+      id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       start: midTime,
       end: seg.end,
       text: words.slice(halfLen).join(' ')
@@ -281,14 +487,16 @@ const CaptionStudio = () => {
     const updated = [...segments];
     updated.splice(index, 1, seg1, seg2);
     setSegments(updated);
+    setActiveSegIndex(index + 1);
     pushHistory(updated);
   };
 
   const handleDuplicateSegment = (index) => {
     const seg = segments[index];
-    const duration = seg.end - seg.start;
+    if (!seg) return;
+    const duration = Math.max(1, seg.end - seg.start);
     const newSeg = {
-      id: Date.now(),
+      id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       start: roundTwo(seg.end),
       end: roundTwo(seg.end + duration),
       text: seg.text
@@ -368,14 +576,12 @@ const CaptionStudio = () => {
     }
   }, [currentTime, segments]);
 
-  const activeCaptionText = segments[activeSegIndex] 
-    ? segments[activeSegIndex].text 
-    : (segments.find(s => currentTime >= s.start && currentTime <= s.end)?.text || '');
+  const activeCaptionText = segments.find(s => currentTime >= s.start && currentTime <= s.end)?.text || '';
 
   // Direct Browser File Download Export Handlers
   const handleExport = async (format) => {
     setExportingFormat(format);
-    setRenderMessage(`Rendering & preparing ${format.toUpperCase()} download...`);
+    setRenderMessage(`Preparing ${format.toUpperCase()} export download...`);
 
     try {
       const response = await axios.post('/api/v1/caption-studio/render', {
@@ -383,28 +589,34 @@ const CaptionStudio = () => {
         transcript: segments,
         subtitleStyle: style,
         exportFormat: format,
-        videoPath: mediaFile ? mediaFile.name : undefined
+        videoPath: serverVideoPath || (mediaFile ? mediaFile.name : undefined)
       }, {
         responseType: 'blob'
       });
 
-      const mimeType = format === 'mp4' 
-        ? 'video/mp4' 
-        : (format === 'json' ? 'application/json' : 'text/plain');
-      const blob = new Blob([response.data], { type: mimeType });
+      const mimeTypes = {
+        mp4: 'video/mp4',
+        srt: 'text/plain',
+        vtt: 'text/vtt',
+        txt: 'text/plain',
+        json: 'application/json'
+      };
+
+      const blob = new Blob([response.data], { type: mimeTypes[format] || 'text/plain' });
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = `captioned_export_${Date.now()}.${format}`;
+      const ext = format === 'mp4' ? 'mp4' : format;
+      a.download = `caption_export_${Date.now()}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(downloadUrl);
 
-      setRenderMessage(`Successfully rendered & downloaded captioned_export_${Date.now()}.${format}!`);
+      setRenderMessage(`Successfully exported ${format.toUpperCase()} file! Check your browser downloads.`);
     } catch (err) {
       console.error('Export failed', err);
-      setRenderMessage('Export operation failed.');
+      setRenderMessage(`Export operation for ${format.toUpperCase()} failed. Ensure server connection is active.`);
     } finally {
       setExportingFormat(null);
     }
@@ -412,12 +624,21 @@ const CaptionStudio = () => {
 
   return (
     <div className="space-y-6">
-      {/* Hidden file input */}
+      {/* Hidden file input for video/audio media upload */}
       <input
         type="file"
         ref={fileInputRef}
         onChange={handleMediaUpload}
         accept="video/*,audio/*"
+        className="hidden"
+      />
+
+      {/* Hidden file input for timed SRT/VTT subtitle import */}
+      <input
+        type="file"
+        ref={srtFileInputRef}
+        onChange={handleSrtFileUpload}
+        accept=".srt,.vtt,.txt"
         className="hidden"
       />
 
@@ -429,55 +650,81 @@ const CaptionStudio = () => {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-              Caption Studio <span className="bg-indigo-500/20 text-indigo-400 text-xs px-2.5 py-0.5 rounded-full border border-indigo-500/30">v1.0 MVP</span>
+              Caption Studio <span className="bg-indigo-500/20 text-indigo-400 text-xs px-2.5 py-0.5 rounded-full border border-indigo-500/30">CapCut & Reels Editor</span>
             </h1>
             <p className="text-xs text-slate-400">
-              Upload custom video or import Text Studio media to edit timed captions with live 9:16 preview & direct FFmpeg video download.
+              Upload custom video/audio for quick Whisper subtitles, import timed SRT files, re-segment word lengths, and export hardcoded MP4 & SRT.
             </p>
           </div>
         </div>
 
-        {/* Media Ingestion Controls */}
+        {/* Media & Subtitle Ingestion Controls */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Upload Video Button */}
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs hover:bg-slate-800 transition"
-            title="Upload custom video to preview captions over it"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition shadow-md shadow-indigo-600/30"
+            title="Upload fresh video to preview subtitles & transcribe"
           >
-            <Upload className="w-3.5 h-3.5 text-indigo-400" />
+            <Upload className="w-3.5 h-3.5" />
             <span>Upload Video</span>
           </button>
 
-          {/* Import Text Studio Project Button */}
+          {/* Quick Subtitles (Whisper) Button */}
+          <button
+            onClick={handleAutoTranscribe}
+            disabled={transcribing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 text-xs hover:bg-emerald-600/30 transition disabled:opacity-50"
+            title="Generate quick subtitles directly with local Whisper"
+          >
+            {transcribing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" /> : <Wand2 className="w-3.5 h-3.5 text-emerald-400" />}
+            <span>Quick Subtitles (Whisper)</span>
+          </button>
+
+          {/* Import Timed SRT / VTT Button */}
+          <button
+            onClick={() => srtFileInputRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs hover:bg-slate-800 transition"
+            title="Import an existing timed .SRT or .VTT file to read & modify"
+          >
+            <FileCode className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Import Timed SRT/VTT</span>
+          </button>
+
+          {/* Break Transcript Granularity Dropdown */}
+          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-1">
+            <span className="text-[10px] text-slate-400 font-semibold px-1">Break Captions:</span>
+            <button
+              onClick={() => handleBreakTranscript('1-2')}
+              className={`px-2 py-0.5 rounded text-[10px] font-mono transition ${selectedGranularity === '1-2' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+              title="Split into 1-2 snappy words per subtitle (TikTok style)"
+            >
+              1-2 Words
+            </button>
+            <button
+              onClick={() => handleBreakTranscript('3-4')}
+              className={`px-2 py-0.5 rounded text-[10px] font-mono transition ${selectedGranularity === '3-4' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+              title="Split into 3-4 words per subtitle (CapCut style)"
+            >
+              3-4 Words
+            </button>
+            <button
+              onClick={() => handleBreakTranscript('sentence')}
+              className={`px-2 py-0.5 rounded text-[10px] font-mono transition ${selectedGranularity === 'sentence' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+              title="Group into full sentences"
+            >
+              Sentence
+            </button>
+          </div>
+
+          {/* Import Text Studio Project Option */}
           <button
             onClick={handleImportTextStudioProject}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs hover:bg-slate-800 transition"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 text-xs hover:bg-slate-800 hover:text-slate-200 transition"
             title="Import active video & transcript from Text Studio"
           >
             <FolderInput className="w-3.5 h-3.5 text-amber-400" />
-            <span>Use Text Studio Project</span>
-          </button>
-
-          {/* Auto-Transcribe Button */}
-          {mediaFile && (
-            <button
-              onClick={handleAutoTranscribe}
-              disabled={transcribing}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 text-xs hover:bg-emerald-600/30 transition"
-            >
-              {transcribing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" /> : <Wand2 className="w-3.5 h-3.5 text-emerald-400" />}
-              <span>Auto-Transcribe Whisper</span>
-            </button>
-          )}
-
-          {/* Script Improvements Button */}
-          <button
-            onClick={handleGenerateScriptImprovements}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs hover:bg-indigo-500/20 transition"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Improve Script</span>
+            <span>Text Studio</span>
           </button>
 
           {/* Undo/Redo */}
@@ -500,23 +747,40 @@ const CaptionStudio = () => {
             </button>
           </div>
 
-          {/* Direct File Download Export MP4 & Subtitles */}
-          <div className="flex items-center gap-1.5">
+          {/* Export Suite */}
+          <div className="flex items-center gap-1">
             <button
               onClick={() => handleExport('srt')}
               disabled={!!exportingFormat}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs hover:bg-slate-800 transition"
+              className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs hover:bg-slate-800 transition"
+              title="Export timed SRT file"
             >
               .SRT
+            </button>
+            <button
+              onClick={() => handleExport('vtt')}
+              disabled={!!exportingFormat}
+              className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs hover:bg-slate-800 transition"
+              title="Export WebVTT file"
+            >
+              .VTT
+            </button>
+            <button
+              onClick={() => handleExport('txt')}
+              disabled={!!exportingFormat}
+              className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs hover:bg-slate-800 transition"
+              title="Export plain text transcript"
+            >
+              .TXT
             </button>
 
             <button
               onClick={() => handleExport('mp4')}
               disabled={!!exportingFormat}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-medium text-xs hover:opacity-90 transition shadow-lg shadow-indigo-600/30"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-medium text-xs hover:opacity-90 transition shadow-lg shadow-indigo-600/30 ml-1"
             >
               {exportingFormat === 'mp4' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Film className="w-3.5 h-3.5" />}
-              <span>Render & Download MP4</span>
+              <span>Burn to MP4 (1:1 Quality)</span>
             </button>
           </div>
         </div>
@@ -530,48 +794,6 @@ const CaptionStudio = () => {
             <span>{renderMessage}</span>
           </div>
           <button onClick={() => setRenderMessage(null)} className="text-slate-400 hover:text-white">✕</button>
-        </div>
-      )}
-
-      {/* Script Improvement Suggestions Drawer / Card */}
-      {showSuggestionsPanel && (
-        <div className="p-4 bg-slate-900/90 border border-indigo-500/40 rounded-2xl space-y-3 relative backdrop-blur-md">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-            <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold">
-              <Lightbulb className="w-4 h-4 text-amber-400" />
-              <span>AI Script Improvement Suggestions</span>
-            </div>
-            <button onClick={() => setShowSuggestionsPanel(false)} className="text-slate-400 hover:text-white text-xs">✕ Close</button>
-          </div>
-
-          {loadingSuggestions ? (
-            <div className="flex items-center gap-2 py-4 justify-center text-xs text-slate-400 font-mono">
-              <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-              <span>Analyzing script hooks, pacing, and retention strategy...</span>
-            </div>
-          ) : scriptSuggestions ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <span className="font-semibold text-amber-400 block mb-1">🔥 Hook Enhancement (First 5s):</span>
-                <p className="text-slate-300 leading-relaxed">{scriptSuggestions.hookEnhancement}</p>
-              </div>
-
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <span className="font-semibold text-emerald-400 block mb-1">⚡ Pacing & Speech Clarity:</span>
-                <p className="text-slate-300 leading-relaxed">{scriptSuggestions.pacingAndClarity}</p>
-              </div>
-
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <span className="font-semibold text-indigo-400 block mb-1">🎯 Viewer Engagement Boost:</span>
-                <p className="text-slate-300 leading-relaxed">{scriptSuggestions.engagementBoost}</p>
-              </div>
-
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <span className="font-semibold text-violet-400 block mb-1">✨ Polished Opening Draft:</span>
-                <p className="text-slate-200 italic leading-relaxed">{scriptSuggestions.improvedDraftSnippet}</p>
-              </div>
-            </div>
-          ) : null}
         </div>
       )}
 

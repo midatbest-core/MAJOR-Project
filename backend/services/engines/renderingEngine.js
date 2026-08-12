@@ -23,16 +23,19 @@ class RenderingEngine {
     return date.toISOString().substring(11, 23);
   }
 
-  static generateSrtString(subtitles = []) {
+  static generateSrtString(subtitles = [], styleConfig = {}) {
     if (!subtitles || subtitles.length === 0) {
-      return `1\n00:00:00,000 --> 00:00:04,500\nWelcome to AI Creator Dashboard!`;
+      const defaultText = styleConfig.uppercase ? "WELCOME TO AI CREATOR DASHBOARD!" : "Welcome to AI Creator Dashboard!";
+      return `1\n00:00:00,000 --> 00:00:04,500\n${defaultText}`;
     }
 
     return subtitles
       .map((sub, idx) => {
         const start = this.formatSrtTimestamp(sub.start || idx * 3);
         const end = this.formatSrtTimestamp(sub.end || (idx + 1) * 3);
-        return `${idx + 1}\n${start} --> ${end}\n${sub.text || sub.content || ''}`;
+        let text = sub.text || sub.content || '';
+        if (styleConfig.uppercase) text = text.toUpperCase();
+        return `${idx + 1}\n${start} --> ${end}\n${text}`;
       })
       .join('\n\n');
   }
@@ -87,10 +90,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   static formatAssTimestamp(seconds) {
     const s = Math.max(0, parseFloat(seconds) || 0);
-    const date = new Date(null);
-    date.setMilliseconds(s * 1000);
-    const timeStr = date.toISOString().substring(11, 22);
-    return timeStr.startsWith('0') ? timeStr.substring(1) : timeStr;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
+    const cs = Math.floor((s % 1) * 100);
+
+    const hh = h.toString();
+    const mm = m.toString().padStart(2, '0');
+    const ss = sec.toString().padStart(2, '0');
+    const cscs = cs.toString().padStart(2, '0');
+
+    return `${hh}:${mm}:${ss}.${cscs}`;
   }
 
   static hexToAssColor(hex, opacity = 1.0) {
@@ -106,29 +116,206 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return `&H${alphaNum}${b.toUpperCase()}${g.toUpperCase()}${r.toUpperCase()}`;
   }
 
+  static getVideoInfo(ffmpegBin, videoPath) {
+    return new Promise((resolve) => {
+      exec(`"${ffmpegBin}" -i "${videoPath}"`, (err, stdout, stderr) => {
+        const match = stderr.match(/Video:.* (\d{3,4})x(\d{3,4})/);
+        if (match) {
+          resolve({ width: parseInt(match[1], 10), height: parseInt(match[2], 10) });
+        } else {
+          resolve({ width: 1080, height: 1920 }); // Fallback to 1080p vertical
+        }
+      });
+    });
+  }
+
+  static hexToRgba(hex, opacity = 1.0) {
+    if (!hex) return 'transparent';
+    const cleanHex = hex.replace('#', '');
+    if (cleanHex.length !== 6) return hex;
+    const r = parseInt(cleanHex.substring(0, 2), 16);
+    const g = parseInt(cleanHex.substring(2, 4), 16);
+    const b = parseInt(cleanHex.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  }
+
   /**
-   * Burn subtitles onto video using FFmpeg with CWD execution to prevent Windows space escaping bugs.
+   * Burn subtitles onto video using Headless Chromium for 100% pixel-perfect CSS rendering
    */
   static renderBurnedVideo(videoPath, subtitles, styleConfig = {}) {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
+      let ffmpegBin = 'ffmpeg';
+      try { ffmpegBin = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
+
+      let puppeteer;
+      try {
+        puppeteer = require('puppeteer');
+      } catch (e) {
+        console.warn('[Rendering Engine] Puppeteer is not installed. Fallback to unedited video.');
+        return resolve({ videoUrl: videoPath, isFallback: true });
+      }
+
+      // Calculate dynamic scale factor to perfectly match CSS browser preview size
+      const { width, height } = await this.getVideoInfo(ffmpegBin, videoPath);
+      const scale = height / 600; // CSS preview is roughly 600px tall
+
       const tempDir = path.dirname(videoPath) || process.cwd();
-      const assFilename = `sub_${Date.now()}.ass`;
-      const assPath = path.join(tempDir, assFilename);
-      const outputFilename = `rendered_${Date.now()}.mp4`;
+      const runId = Date.now();
+      const outputFilename = `rendered_${runId}.mp4`;
       const outputVideoPath = path.join(tempDir, outputFilename);
+      const framesDir = path.join(tempDir, `frames_${runId}`);
+      fs.mkdirSync(framesDir, { recursive: true });
 
       try {
-        const assContent = this.generateAssString(subtitles, styleConfig);
-        fs.writeFileSync(assPath, assContent);
+        const hasBackground = styleConfig.backgroundColor && styleConfig.backgroundColor !== 'transparent';
+        const bgColor = hasBackground ? this.hexToRgba(styleConfig.backgroundColor, styleConfig.backgroundOpacity ?? 0.75) : 'transparent';
+        const fontSizePx = Math.round((styleConfig.fontSize || 24) * scale);
+        const paddingVPx = Math.round(14 * scale);
+        const paddingHPx = Math.round(24 * scale);
+        const borderRadiusPx = Math.round(12 * scale);
+        
+        let justifyContent = 'flex-end';
+        let paddingBottom = '10%';
+        let paddingTop = '0';
+        
+        if (styleConfig.position === 'top') {
+          justifyContent = 'flex-start';
+          paddingTop = '10%';
+          paddingBottom = '0';
+        } else if (styleConfig.position === 'center') {
+          justifyContent = 'center';
+          paddingTop = '0';
+          paddingBottom = '0';
+        }
 
-        // FFmpeg command using CWD relative paths to bypass Windows path space escaping issues
-        const command = `ffmpeg -i "${path.basename(videoPath)}" -vf "subtitles='${assFilename}'" -c:a copy "${outputFilename}" -y`;
+        const shadowCSS = styleConfig.shadowColor && styleConfig.shadowColor !== 'transparent'
+          ? `0px ${Math.round((styleConfig.shadowOffset || 0) * scale)}px ${Math.round((styleConfig.shadowOffset || 0) * scale)}px ${styleConfig.shadowColor}`
+          : 'none';
+          
+        const strokeCSS = styleConfig.strokeColor && styleConfig.strokeWidth
+          ? `${Math.round((styleConfig.strokeWidth || 0) * scale)}px ${styleConfig.strokeColor}`
+          : '0';
 
-        exec(command, { cwd: tempDir, timeout: 60000 }, (error) => {
-          try { fs.unlinkSync(assPath); } catch (e) {}
+        const fontName = styleConfig.fontFamily || 'Arial';
+        const textTransform = styleConfig.uppercase ? 'uppercase' : 'none';
+
+        const htmlTemplate = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+          <style>
+            body {
+              margin: 0;
+              padding: 0;
+              width: ${width}px;
+              height: ${height}px;
+              background-color: transparent;
+              display: flex;
+              flex-direction: column;
+              justify-content: ${justifyContent};
+              align-items: center;
+              padding-top: ${paddingTop};
+              padding-bottom: ${paddingBottom};
+              box-sizing: border-box;
+              overflow: hidden;
+            }
+            .caption-box {
+              font-family: '${fontName}', sans-serif;
+              font-size: ${fontSizePx}px;
+              font-weight: 700;
+              color: ${styleConfig.primaryColor || '#FFFFFF'};
+              background-color: ${bgColor};
+              padding: ${paddingVPx}px ${paddingHPx}px;
+              border-radius: ${borderRadiusPx}px;
+              text-align: center;
+              max-width: 80%;
+              word-wrap: break-word;
+              white-space: pre-wrap;
+              text-shadow: ${shadowCSS};
+              -webkit-text-stroke: ${strokeCSS};
+              text-transform: ${textTransform};
+              line-height: 1.3;
+            }
+          </style>
+        </head>
+        <body>
+          <div id="caption" class="caption-box"></div>
+        </body>
+        </html>
+        `;
+
+        const htmlPath = path.join(framesDir, 'template.html');
+        fs.writeFileSync(htmlPath, htmlTemplate);
+
+        const browser = await puppeteer.launch({
+          headless: 'new',
+          args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
+        await page.setViewport({ width, height, deviceScaleFactor: 1 });
+        await page.goto(`file://${htmlPath}`);
+        // Wait for fonts to load
+        await page.evaluateHandle('document.fonts.ready');
+
+        const concatLines = ['ffconcat version 1.0'];
+        let lastEnd = 0;
+
+        for (let i = 0; i < subtitles.length; i++) {
+          const sub = subtitles[i];
+          const start = parseFloat(sub.start) || 0;
+          const end = parseFloat(sub.end) || 0;
+          
+          if (start > lastEnd) {
+            // Gap between subtitles
+            concatLines.push(`file 'empty.png'`);
+            concatLines.push(`duration ${(start - lastEnd).toFixed(3)}`);
+          }
+
+          const text = (sub.text || sub.content || '').trim();
+          await page.evaluate((txt) => {
+            document.getElementById('caption').innerText = txt;
+          }, text);
+
+          const pngName = `frame_${i}.png`;
+          const pngPath = path.join(framesDir, pngName);
+          await page.screenshot({ path: pngPath, omitBackground: true });
+
+          concatLines.push(`file '${pngName}'`);
+          concatLines.push(`duration ${(end - start).toFixed(3)}`);
+          
+          lastEnd = end;
+        }
+
+        // Generate full-resolution empty transparent PNG for gaps
+        // This is CRITICAL because FFmpeg concat demuxer adopts the resolution of the FIRST file it encounters.
+        // If empty.png is 1x1, it shrinks all subtitles to 1x1!
+        await page.evaluate(() => {
+          document.getElementById('caption').innerText = '';
+        });
+        const emptyPngPath = path.join(framesDir, 'empty.png');
+        await page.screenshot({ path: emptyPngPath, omitBackground: true });
+
+        // Add empty frame at the very end to clear last subtitle
+        concatLines.push(`file 'empty.png'`);
+        
+        await browser.close();
+
+        const concatPath = path.join(framesDir, 'concat.txt');
+        fs.writeFileSync(concatPath, concatLines.join('\n'));
+
+        // FFmpeg overlay command
+        // [0:v] is main video, [1:v] is concat image sequence.
+        // We use fps filter to ensure image sequence plays exactly in sync, then overlay.
+        const escapedConcatFile = concatPath.replace(/\\/g, '/');
+        const command = `"${ffmpegBin}" -i "${path.basename(videoPath)}" -f concat -safe 0 -i "${escapedConcatFile}" -filter_complex "[1:v]fps=30[sub];[0:v][sub]overlay=0:0" -c:v libx264 -preset ultrafast -crf 22 -c:a copy "${outputFilename}" -y`;
+
+        exec(command, { cwd: tempDir, timeout: 180000 }, (error, stdout, stderr) => {
+          // Cleanup frames
+          try { fs.rmSync(framesDir, { recursive: true, force: true }); } catch (e) {}
 
           if (error || !fs.existsSync(outputVideoPath)) {
-            console.warn(`[Rendering Engine Notice] FFmpeg video rendering fallback: ${error ? error.message : 'Output file missing'}`);
+            console.warn(`[Rendering Engine Notice] FFmpeg video rendering fallback: ${error ? error.message : 'Output file missing'}\nStderr: ${stderr}`);
             return resolve({ videoUrl: videoPath, isFallback: true });
           }
 
@@ -136,6 +323,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         });
       } catch (err) {
         console.warn(`[Rendering Engine Error] ${err.message}`);
+        try { fs.rmSync(framesDir, { recursive: true, force: true }); } catch (e) {}
         resolve({ videoUrl: videoPath, isFallback: true });
       }
     });
