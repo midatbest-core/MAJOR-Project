@@ -4,6 +4,7 @@ const Project = require('../models/Project');
 const CreatorAnalysis = require('../models/CreatorAnalysisModel');
 const PipelineOrchestrator = require('../services/orchestrator');
 const CreatorAiEngine = require('../services/engines/creatorAiEngine');
+const ProcessingEngine = require('../services/engines/processingEngine');
 const { generateScriptImprovements } = require('../services/llmService');
 const { sendSuccess, sendError } = require('../utils/responseHandler');
 const { runPythonScript } = require('../services/pythonBridge');
@@ -34,6 +35,12 @@ const uploadMedia = async (req, res) => {
     const generatedProjId = generateProjectId();
 
     if (req.file) {
+      const duration = await ProcessingEngine.getMediaDuration(req.file.path);
+      if (duration > 120) {
+        ProcessingEngine.cleanupFile(req.file.path);
+        return sendError(res, 'Validation failed', [{ field: 'file', code: 'DURATION_EXCEEDED', description: 'Media duration exceeds the 2-minute limit.' }], 400);
+      }
+
       const serverMediaUrl = `/uploads/${req.file.filename}`;
       newProject = new Project({
         projectId: generatedProjId,
@@ -111,7 +118,7 @@ const transcribeMedia = async (req, res) => {
 
     if (filePath) {
       try {
-        const result = await runPythonScript('transcribe_whisper.py', { filePath });
+        const result = await runPythonScript('transcribe_whisper.py', { filePath }, 600000);
         if (result && result.transcript && result.transcript.length > 0) {
           transcriptSegments = result.transcript;
           fullText = result.fullText || transcriptSegments.map(s => s.text).join(' ');
@@ -228,10 +235,11 @@ const analyzeText = async (req, res) => {
 const generateScriptImprovementsController = async (req, res) => {
   try {
     const { scriptText } = req.body;
+    const options = { geminiApiKey: req.headers['x-gemini-key'] };
     if (!scriptText) {
       return sendError(res, 'Validation failed', [{ field: 'scriptText', description: 'Script text required' }], 400);
     }
-    const suggestions = await generateScriptImprovements(scriptText);
+    const suggestions = await generateScriptImprovements(scriptText, options);
     return sendSuccess(res, { suggestions }, 'Script suggestions generated successfully');
   } catch (err) {
     return sendError(res, 'Script improvement failed', err, 500);
@@ -280,7 +288,8 @@ const downloadTranscript = async (req, res) => {
 const generateTitlesController = async (req, res) => {
   try {
     const { topic, niche = 'General' } = req.body;
-    const titles = await CreatorAiEngine.generateTitles(topic, niche);
+    const options = { geminiApiKey: req.headers['x-gemini-key'] };
+    const titles = await CreatorAiEngine.generateTitles(topic, niche, 3, options);
     return sendSuccess(res, { titles }, 'Titles generated successfully');
   } catch (err) {
     return sendError(res, 'Title generation failed', err, 500);
@@ -290,7 +299,8 @@ const generateTitlesController = async (req, res) => {
 const generateDescriptionController = async (req, res) => {
   try {
     const { topic, niche = 'General' } = req.body;
-    const description = await CreatorAiEngine.generateDescription(topic, niche);
+    const options = { geminiApiKey: req.headers['x-gemini-key'] };
+    const description = await CreatorAiEngine.generateDescription(topic, niche, options);
     return sendSuccess(res, { description }, 'Description generated successfully');
   } catch (err) {
     return sendError(res, 'Description generation failed', err, 500);
@@ -300,7 +310,8 @@ const generateDescriptionController = async (req, res) => {
 const generateHashtagsController = async (req, res) => {
   try {
     const { topic, niche = 'General' } = req.body;
-    const hashtags = await CreatorAiEngine.generateHashtags(topic, niche);
+    const options = { geminiApiKey: req.headers['x-gemini-key'] };
+    const hashtags = await CreatorAiEngine.generateHashtags(topic, niche, options);
     return sendSuccess(res, { hashtags }, 'Hashtags generated successfully');
   } catch (err) {
     return sendError(res, 'Hashtag generation failed', err, 500);

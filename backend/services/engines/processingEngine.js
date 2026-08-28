@@ -72,6 +72,28 @@ class ProcessingEngine {
   }
 
   /**
+   * Get media duration in seconds using FFmpeg
+   */
+  static getMediaDuration(filePath) {
+    return new Promise((resolve) => {
+      let ffmpegBin = 'ffmpeg';
+      try { ffmpegBin = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
+      
+      exec(`"${ffmpegBin}" -i "${filePath}"`, (error, stdout, stderr) => {
+        const match = stderr.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})/);
+        if (match) {
+          const hours = parseInt(match[1], 10);
+          const minutes = parseInt(match[2], 10);
+          const seconds = parseFloat(match[3]);
+          resolve(hours * 3600 + minutes * 60 + seconds);
+        } else {
+          resolve(0);
+        }
+      });
+    });
+  }
+
+  /**
    * Get paths to temp and uploads folders
    */
   static getDirectories() {

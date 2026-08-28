@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import apiClient from '../services/apiClient';
 import {
@@ -33,6 +33,18 @@ const CreatorIntelligence = () => {
   const [analyzedData, setAnalyzedData] = useState(null);
   const [inspiration, setInspiration] = useState(null);
   const [copiedIndex, setCopiedIndex] = useState(null);
+  const lastVideoId = useRef(null);
+
+  // Automatically clear the cache for this user's analyzed video when they leave the session
+  useEffect(() => {
+    return () => {
+      if (lastVideoId.current) {
+        apiClient.delete(`/creator-intelligence/cache/${lastVideoId.current}`).catch(err => {
+          console.warn('Failed to clear session cache:', err);
+        });
+      }
+    };
+  }, []);
 
   const handleAnalyzeCompetitor = async () => {
     if (!youtubeUrl) return;
@@ -50,6 +62,7 @@ const CreatorIntelligence = () => {
 
       if (ytRes.data.success && ytRes.data.data) {
         setAnalyzedData(ytRes.data.data);
+        lastVideoId.current = ytRes.data.data.videoId;
       }
 
       // Step 2: Personalized Inspiration & Content Blueprint via API v1
@@ -64,7 +77,8 @@ const CreatorIntelligence = () => {
       }
     } catch (err) {
       console.error('YouTube analysis error:', err);
-      alert('Analysis completed with fallback intelligence engine.');
+      const backendErrorMsg = err.response?.data?.errors?.[0]?.description || err.response?.data?.message || err.message;
+      alert(`Analysis Failed:\n${backendErrorMsg}`);
     } finally {
       setLoading(false);
     }
@@ -227,6 +241,24 @@ const CreatorIntelligence = () => {
                 <span className="text-[11px] text-slate-500 font-medium">Benchmark: &gt; 5%</span>
               </div>
             </div>
+
+            {/* AI Summary Section */}
+            {analyzedData.audienceIntelligence.aiSummary && (
+              <div className="mt-6 p-5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-indigo-500/20 rounded-lg shrink-0 mt-0.5">
+                    <Sparkles className="w-5 h-5 text-indigo-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white mb-1.5">Executive AI Summary</h3>
+                    <p className="text-sm text-slate-300 leading-relaxed">
+                      {analyzedData.audienceIntelligence.aiSummary}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Audience Intelligence & Comment Sentiment */}
@@ -270,8 +302,42 @@ const CreatorIntelligence = () => {
                 </div>
               </div>
 
+              {/* Sentiment Quote Details */}
+              {(analyzedData.audienceIntelligence.positiveSentimentDetails?.length > 0 || analyzedData.audienceIntelligence.negativeSentimentDetails?.length > 0) && (
+                <div className="pt-4 border-t border-slate-800 mt-4 space-y-3">
+                  {analyzedData.audienceIntelligence.positiveSentimentDetails?.length > 0 && (
+                    <div>
+                      <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block mb-1">Top Positive Feedback</span>
+                      <ul className="space-y-1">
+                        {analyzedData.audienceIntelligence.positiveSentimentDetails.map((quote, idx) => (
+                          <li key={idx} className="text-xs text-slate-300 italic flex items-start gap-1.5">
+                            <span className="text-emerald-500 font-serif">"</span>
+                            {quote}
+                            <span className="text-emerald-500 font-serif">"</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {analyzedData.audienceIntelligence.negativeSentimentDetails?.length > 0 && (
+                    <div>
+                      <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block mb-1">Core Pain Points</span>
+                      <ul className="space-y-1">
+                        {analyzedData.audienceIntelligence.negativeSentimentDetails.map((quote, idx) => (
+                          <li key={idx} className="text-xs text-slate-300 italic flex items-start gap-1.5">
+                            <span className="text-rose-500 font-serif">"</span>
+                            {quote}
+                            <span className="text-rose-500 font-serif">"</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Trending Discussion Keywords */}
-              <div className="pt-3 border-t border-slate-800">
+              <div className="pt-4 border-t border-slate-800">
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">
                   Trending Discussion Keywords
                 </span>
@@ -340,6 +406,59 @@ const CreatorIntelligence = () => {
               </ul>
             </div>
           </div>
+
+          {/* New Section: Creator Strategy Insights (Niche, What Works, What Doesn't) */}
+          {(analyzedData.audienceIntelligence.targetNicheIdeas || analyzedData.audienceIntelligence.whatWorks) && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Target Niche Ideas */}
+              <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <Target className="w-4 h-4 text-blue-400" />
+                  Target Niche Pivot Ideas
+                </h3>
+                <ul className="space-y-2 text-xs text-slate-300">
+                  {analyzedData.audienceIntelligence.targetNicheIdeas?.map((item, i) => (
+                    <li key={i} className="flex items-start gap-2 bg-blue-500/5 p-2.5 rounded-lg border border-blue-500/10">
+                      <ArrowRight className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* What Works */}
+              <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  What Works Well
+                </h3>
+                <ul className="space-y-2 text-xs text-slate-300">
+                  {analyzedData.audienceIntelligence.whatWorks?.map((item, i) => (
+                    <li key={i} className="flex items-start gap-2 bg-emerald-500/5 p-2.5 rounded-lg border border-emerald-500/10">
+                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* What Doesn't Work */}
+              <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400" />
+                  What Hurts Retention
+                </h3>
+                <ul className="space-y-2 text-xs text-slate-300">
+                  {analyzedData.audienceIntelligence.whatDoesntWork?.map((item, i) => (
+                    <li key={i} className="flex items-start gap-2 bg-rose-500/5 p-2.5 rounded-lg border border-rose-500/10">
+                      <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
 
           {/* Success Pattern Analysis (Rule-based + AI presented as recommendations) */}
           {analyzedData.successPatterns && (

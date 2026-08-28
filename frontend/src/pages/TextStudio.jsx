@@ -190,7 +190,7 @@ const TextStudio = () => {
       toast.success('Text Studio analysis complete! Review your insights below.');
     } catch (err) {
       console.error('Processing error:', err);
-      toast.error(err.response?.data?.message || 'Processing encountered an error. Using local fallback engine.');
+      toast.error(err.response?.data?.errors?.[0]?.description || err.response?.data?.message || 'Processing encountered an error.');
     } finally {
       setLoading(false);
     }
@@ -204,7 +204,7 @@ const TextStudio = () => {
       setScriptSuggestions(res?.data?.data?.suggestions || null);
       toast.success('Script improvement suggestions generated!');
     } catch (e) {
-      toast.error('Failed to generate script suggestions.');
+      toast.error(e.response?.data?.errors?.[0]?.description || e.response?.data?.message || 'Failed to generate script suggestions.');
     } finally {
       setLoadingSuggestions(false);
     }
@@ -441,7 +441,7 @@ const TextStudio = () => {
                   </button>
 
                   <button
-                    onClick={() => window.location.href = '/caption-studio'}
+                    onClick={() => navigate('/caption-studio')}
                     className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-xs font-bold hover:opacity-90 transition shadow-lg shadow-indigo-600/30"
                   >
                     <Subtitles className="w-4 h-4 text-indigo-200" />

@@ -43,12 +43,12 @@ class PipelineOrchestrator {
   /**
    * Pipeline 2: Creator Intelligence YouTube Analysis & Inspiration Workflow
    */
-  static async executeYouTubeAnalysisPipeline(youtubeUrl, niche, topic) {
-    return await AnalyticsEngine.analyzeYouTubeVideo(youtubeUrl, niche, topic);
+  static async executeYouTubeAnalysisPipeline(youtubeUrl, niche, topic, options = {}) {
+    return await AnalyticsEngine.analyzeYouTubeVideo(youtubeUrl, niche, topic, options);
   }
 
-  static async executeCreatorInspirationPipeline(youtubeUrl, niche, topic) {
-    return await CreatorAiEngine.generateInspiration(youtubeUrl, niche, topic);
+  static async executeCreatorInspirationPipeline(youtubeUrl, niche, topic, options = {}) {
+    return await CreatorAiEngine.generateInspiration(youtubeUrl, niche, topic, options);
   }
 
   /**

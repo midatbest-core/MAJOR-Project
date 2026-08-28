@@ -44,7 +44,9 @@ const CaptionStudio = () => {
     shadowColor: 'rgba(0,0,0,0.8)',
     shadowOffset: 4,
     position: 'bottom',
-    uppercase: false
+    uppercase: false,
+    animation: 'none',
+    highlightColor: '#FFD700'
   });
 
   // Media & Video State
@@ -88,6 +90,30 @@ const CaptionStudio = () => {
   const [scriptSuggestions, setScriptSuggestions] = useState(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [showSuggestionsPanel, setShowSuggestionsPanel] = useState(false);
+
+  // Auto-load active project from Text Studio on mount
+  useEffect(() => {
+    try {
+      const savedProject = localStorage.getItem('activeStudioProject');
+      if (savedProject) {
+        const parsed = JSON.parse(savedProject);
+        if (parsed.transcript && parsed.transcript.length > 0) {
+          const normalized = normalizeSegments(parsed.transcript);
+          setSegments(normalized);
+          setHistory([normalized]);
+          setHistoryStep(0);
+        }
+        if (parsed.videoUrl) {
+          setVideoUrl(parsed.videoUrl);
+        }
+        if (parsed.projectId) setProjectId(parsed.projectId);
+        setRenderMessage(`Loaded active project transcript & media from Text Studio!`);
+      }
+    } catch (e) {
+      console.warn("Could not auto-load Text Studio project.", e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Parse timed SRT or VTT files into subtitle segments
   const parseSrtOrVtt = (content) => {
@@ -140,41 +166,55 @@ const CaptionStudio = () => {
     setSelectedGranularity(granularity);
     if (!targetSegments || targetSegments.length === 0) return;
 
-    const fullText = targetSegments.map(s => s.text).join(' ');
-    const firstStart = targetSegments[0].start || 0;
-    const lastEnd = targetSegments[targetSegments.length - 1].end || 15;
-    const totalDuration = Math.max(1, lastEnd - firstStart);
+    let resegmented = [];
 
-    let chunks = [];
+    targetSegments.forEach(seg => {
+      const text = seg.text || '';
+      const start = seg.start || 0;
+      const end = seg.end || (start + 2);
+      const duration = Math.max(0.1, end - start);
 
-    if (granularity === 'sentence') {
-      const matches = fullText.match(/[^.!?]+[.!?]+/g) || [fullText];
-      chunks = matches.map(s => s.trim()).filter(Boolean);
-    } else {
-      const words = fullText.trim().split(/\s+/).filter(Boolean);
-      const chunkSize = granularity === '1-2' ? 2 : 4;
-      for (let i = 0; i < words.length; i += chunkSize) {
-        chunks.push(words.slice(i, i + chunkSize).join(' '));
+      if (granularity === 'sentence') {
+        const matches = text.match(/[^.!?]+[.!?]+/g) || [text];
+        const chunks = matches.map(s => s.trim()).filter(Boolean);
+        const totalWords = text.trim().split(/\s+/).filter(Boolean).length || 1;
+        
+        let currStart = start;
+        chunks.forEach((chunk, idx) => {
+          const wordCount = chunk.trim().split(/\s+/).filter(Boolean).length || 1;
+          const chunkDur = (wordCount / totalWords) * duration;
+          const chunkEnd = idx === chunks.length - 1 ? end : roundTwo(currStart + chunkDur);
+          
+          resegmented.push({
+            id: `break_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            start: currStart,
+            end: chunkEnd,
+            text: chunk
+          });
+          currStart = chunkEnd;
+        });
+      } else {
+        const words = text.trim().split(/\s+/).filter(Boolean);
+        const chunkSize = granularity === '1-2' ? 2 : 4;
+        
+        const totalWords = words.length || 1;
+        let currStart = start;
+        
+        for (let i = 0; i < words.length; i += chunkSize) {
+          const chunkWords = words.slice(i, i + chunkSize);
+          const chunkText = chunkWords.join(' ');
+          const chunkDur = (chunkWords.length / totalWords) * duration;
+          const chunkEnd = (i + chunkSize >= words.length) ? end : roundTwo(currStart + chunkDur);
+          
+          resegmented.push({
+            id: `break_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            start: currStart,
+            end: chunkEnd,
+            text: chunkText
+          });
+          currStart = chunkEnd;
+        }
       }
-    }
-
-    if (chunks.length === 0) return;
-
-    const totalWords = fullText.trim().split(/\s+/).filter(Boolean).length || 1;
-    let currStart = firstStart;
-
-    const resegmented = chunks.map((textChunk, idx) => {
-      const wordCount = textChunk.trim().split(/\s+/).filter(Boolean).length || 1;
-      const chunkDur = roundTwo((wordCount / totalWords) * totalDuration);
-      const end = idx === chunks.length - 1 ? lastEnd : roundTwo(currStart + Math.max(0.6, chunkDur));
-      const seg = {
-        id: `break_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 4)}`,
-        start: currStart,
-        end: end,
-        text: textChunk
-      };
-      currStart = end;
-      return seg;
     });
 
     const normalized = normalizeSegments(resegmented);
@@ -550,7 +590,7 @@ const CaptionStudio = () => {
   // Media playback timer simulation
   useEffect(() => {
     let interval = null;
-    if (isPlaying) {
+    if (isPlaying && !videoUrl) {
       interval = setInterval(() => {
         setCurrentTime(prev => {
           const nextTime = prev + 0.1;
@@ -566,7 +606,7 @@ const CaptionStudio = () => {
       clearInterval(interval);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, segments]);
+  }, [isPlaying, segments, videoUrl]);
 
   // Sync active segment index based on current time
   useEffect(() => {
@@ -576,7 +616,8 @@ const CaptionStudio = () => {
     }
   }, [currentTime, segments]);
 
-  const activeCaptionText = segments.find(s => currentTime >= s.start && currentTime <= s.end)?.text || '';
+  const activeSegment = segments.find(s => currentTime >= s.start && currentTime <= s.end) || null;
+  const activeCaptionText = activeSegment?.text || '';
 
   // Direct Browser File Download Export Handlers
   const handleExport = async (format) => {
@@ -829,8 +870,9 @@ const CaptionStudio = () => {
               isPlaying={isPlaying}
               onTogglePlay={() => setIsPlaying(!isPlaying)}
               onSeek={(val) => setCurrentTime(val)}
-              activeCaptionText={activeCaptionText}
+              activeSegment={activeSegment}
               subtitleStyle={style}
+              onChangeStyle={setStyle}
               aspectRatio={aspectRatio}
               onChangeAspectRatio={setAspectRatio}
             />

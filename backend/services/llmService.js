@@ -1,4 +1,5 @@
 const axios = require('axios');
+const AppError = require('../shared/AppError');
 
 /**
  * Polished, High-Accuracy LLM & Dynamic Creator Service
@@ -12,11 +13,14 @@ const cleanJsonString = (raw) => {
   return match ? match[0] : str;
 };
 
-const generateLLMText = async (prompt, format = 'text') => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
+const generateLLMText = async (prompt, format = 'text', options = {}) => {
+  const apiKey = options.geminiApiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new AppError('Gemini API Key is missing. Please configure it in Settings or backend environment variables.', 500);
+  }
 
   const models = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash'];
+  let lastError = null;
 
   for (const model of models) {
     try {
@@ -27,7 +31,7 @@ const generateLLMText = async (prompt, format = 'text') => {
             parts: [{ text: prompt }]
           }]
         },
-        { timeout: 4000 }
+        { timeout: 15000 }
       );
 
       const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -43,6 +47,7 @@ const generateLLMText = async (prompt, format = 'text') => {
       }
       return text.trim();
     } catch (err) {
+      lastError = err;
       if (err.response?.status === 429) {
         console.warn(`[LLM Service] Gemini ${model} rate-limited (429).`);
       } else if (err.response?.status !== 404) {
@@ -50,11 +55,12 @@ const generateLLMText = async (prompt, format = 'text') => {
       }
     }
   }
-  return null;
+  
+  throw new AppError(`AI Generation failed: ${lastError ? lastError.message : 'Unknown error'}`, 500);
 };
 
-const summarizeTranscript = async (text, projectTitle = '') => {
-  if (!text || text.length < 15) return null;
+const summarizeTranscript = async (text, projectTitle = '', options = {}) => {
+  if (!text || text.length < 15) throw new AppError('Transcript too short for summarization.', 400);
 
   const prompt = `You are an elite YouTube Content Summarizer & Senior Editor.
 Video Title: "${projectTitle || 'Creator Video'}"
@@ -68,15 +74,15 @@ Rules:
 3. Write in clean third-person English (e.g., "This video explores...").
 4. Return ONLY the 2-sentence summary without conversational intro.`;
 
-  const res = await generateLLMText(prompt, 'text');
+  const res = await generateLLMText(prompt, 'text', options);
   if (res && res.length > 25 && res.length < 500) {
     return res.trim().replace(/^["']|["']$/g, '');
   }
-  return null;
+  throw new AppError('AI returned an invalid summary format.', 500);
 };
 
-const generateScriptImprovements = async (scriptText) => {
-  if (!scriptText || scriptText.length < 10) return null;
+const generateScriptImprovements = async (scriptText, options = {}) => {
+  if (!scriptText || scriptText.length < 10) throw new AppError('Script too short to improve.', 400);
 
   const prompt = `Act as an Elite YouTube Script Consultant & Senior Copywriter.
 Analyze the following script/transcript:
@@ -90,23 +96,14 @@ Provide specific, actionable script improvements in this strict JSON structure:
   "improvedDraftSnippet": "A polished, punchy version of the opening 3-4 sentences"
 }`;
 
-  const res = await generateLLMText(prompt, 'json');
+  const res = await generateLLMText(prompt, 'json', options);
   if (res && res.hookEnhancement) return res;
 
-  const clean = scriptText.trim();
-  const sentences = clean.split(/(?<=[.!?])\s+/);
-  const opening = sentences[0] || clean.substring(0, 80);
-
-  return {
-    hookEnhancement: `Lead directly with the high-stakes problem: "${opening.substring(0, 60)}..." before giving background intro.`,
-    pacingAndClarity: `Trim conversational filler words and keep average sentence length under 15 words for maximum speech clarity.`,
-    engagementBoost: `Add a curiosity gap at 0:30 telling viewers what unique value or secret they'll unlock by watching till the end.`,
-    improvedDraftSnippet: `"${opening.toUpperCase()} Here is the exact step-by-step breakdown you need."`
-  };
+  throw new AppError('AI failed to generate valid script improvements.', 500);
 };
 
-const analyzeAudienceComments = async ({ title, comments = [], niche, topic }) => {
-  const commentText = comments.length > 0 ? comments.slice(0, 15).join('\n') : `Video title: ${title}`;
+const analyzeAudienceComments = async ({ title, comments = [], niche, topic }, options = {}) => {
+  const commentText = comments.length > 0 ? comments.slice(0, 100).join('\n') : `Video title: ${title}`;
   
   const prompt = `You are an AI Audience Intelligence Analyst for YouTube content.
 Video Title: "${title}"
@@ -116,47 +113,44 @@ Topic: "${topic || title}"
 Comments Sample:
 ${commentText}
 
-Return a strict JSON object:
+Return a strict JSON object with EXACTLY these keys:
 {
   "commentSentiment": { "positive": 75, "neutral": 15, "negative": 10 },
+  "aiSummary": "A 2-3 sentence overarching summary of the video's reception and core value delivered.",
+  "positiveSentimentDetails": ["Exact quote or specific detail driving positive reception 1", "Detail 2"],
+  "negativeSentimentDetails": ["Exact pain point, confusion, or critique 1", "Detail 2"],
   "lovedAspects": ["Loved aspect 1 specific to ${topic}", "Loved aspect 2", "Loved aspect 3"],
   "dislikedAspects": ["Constructive critique 1 for ${topic}", "Critique 2"],
   "frequentlyRequested": ["Requested follow-up 1 on ${topic}", "Request 2", "Request 3"],
-  "trendingTopics": ["Trending subtopic 1", "Trending subtopic 2", "Trending subtopic 3"]
+  "trendingTopics": ["Trending subtopic 1", "Trending subtopic 2", "Trending subtopic 3"],
+  "targetNicheIdeas": ["Target niche pivot/idea 1", "Target niche idea 2"],
+  "whatWorks": ["Element that works exceptionally well 1", "Element 2"],
+  "whatDoesntWork": ["Element that fails or hurts retention 1", "Element 2"]
 }`;
 
-  const aiResult = await generateLLMText(prompt, 'json');
-  if (aiResult && aiResult.commentSentiment && aiResult.lovedAspects) {
+  const aiResult = await generateLLMText(prompt, 'json', options);
+  if (aiResult && aiResult.commentSentiment && aiResult.aiSummary) {
     return aiResult;
   }
-  return null;
+  throw new AppError('AI failed to parse audience comments.', 500);
 };
 
-const generateTitles = async ({ topic, niche, keywords = [] }) => {
+const generateTitles = async ({ topic, niche, keywords = [] }, options = {}) => {
   const kwString = keywords.length > 0 ? keywords.join(', ') : topic;
   const prompt = `Generate 5 viral, high-CTR YouTube title suggestions for a video in the "${niche || 'General'}" niche about "${topic}". Keywords: ${kwString}. Output ONLY a raw JSON array of string titles.`;
   
-  const res = await generateLLMText(prompt, 'json');
+  const res = await generateLLMText(prompt, 'json', options);
   if (Array.isArray(res)) return res;
 
-  const topicTitle = topic ? topic.trim() : 'Content Strategy';
-  const cleanNiche = niche || 'Creator';
-  return [
-    `How to Master ${topicTitle} in 2026 (Step-by-Step Guide)`,
-    `The Secret to ${topicTitle} Nobody Talks About`,
-    `Stop Making This Huge ${cleanNiche} Mistake (${topicTitle})`,
-    `${topicTitle}: 5 Proven Strategies for Rapid Growth`,
-    `I Built a Custom ${topicTitle} Workflow — Here Is What Happened`
-  ];
+  throw new AppError('AI failed to generate titles.', 500);
 };
 
-const generateDescription = async ({ topic, summary = '', niche }) => {
+const generateDescription = async ({ topic, summary = '', niche }, options = {}) => {
   const prompt = `Write an SEO-optimized YouTube description for a video about "${topic}". Summary: "${summary}". Include timestamps placeholder, call to action, and hashtags.`;
-  const res = await generateLLMText(prompt, 'text');
+  const res = await generateLLMText(prompt, 'text', options);
   if (res) return res;
 
-  const mainTopic = topic || 'Video Content';
-  return `📌 In this video, we dive deep into ${mainTopic}.\n\n${summary ? 'Summary: ' + summary + '\n\n' : ''}⏱️ Timestamps:\n00:00 - Introduction & Hook\n01:30 - Core Concept & Breakdown\n05:00 - Step-by-Step Demonstration\n08:30 - Key Takeaways & Action Plan\n\n🔔 Don't forget to Like, Subscribe, and leave your thoughts in the comments below!`;
+  throw new AppError('AI failed to generate description.', 500);
 };
 
 const generateHashtags = async ({ topic, keywords = [] }) => {

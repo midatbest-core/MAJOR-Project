@@ -101,7 +101,7 @@ Respond strictly in valid JSON format.`;
   /**
    * Generates dynamic Personalized Inspiration & 5-Stage Blueprint
    */
-  static async generateInspiration(youtubeUrl, niche = 'Programming', topic = 'Machine Learning Roadmap') {
+  static async generateInspiration(youtubeUrl, niche = 'Programming', topic = 'Machine Learning Roadmap', options = {}) {
     const cleanTopic = (topic || 'Content Optimization').trim();
     const cleanNiche = (niche || 'Creator').trim();
 
@@ -142,7 +142,13 @@ Return a strict JSON object with this exact schema:
   ]
 }`;
 
-    const aiRes = await generateLLMText(prompt, 'json');
+    let aiRes = null;
+    try {
+      aiRes = await generateLLMText(prompt, 'json', options);
+    } catch (e) {
+      console.warn('[Creator AI Engine] LLM failed for inspiration, falling back to local static generation:', e.message);
+    }
+
     if (aiRes && aiRes.videoIdeas && aiRes.blueprint) {
       return aiRes;
     }

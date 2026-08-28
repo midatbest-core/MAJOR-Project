@@ -14,6 +14,13 @@ apiClient.interceptors.request.use((config) => {
   } else if (!config.headers['Content-Type']) {
     config.headers['Content-Type'] = 'application/json';
   }
+
+  // Inject API keys from Settings if they exist
+  const geminiKey = localStorage.getItem('GEMINI_API_KEY');
+  const youtubeKey = localStorage.getItem('YOUTUBE_API_KEY');
+  if (geminiKey) config.headers['X-Gemini-Key'] = geminiKey;
+  if (youtubeKey) config.headers['X-YouTube-Key'] = youtubeKey;
+
   return config;
 }, (error) => {
   return Promise.reject(error);

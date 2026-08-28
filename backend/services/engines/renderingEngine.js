@@ -177,6 +177,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         let justifyContent = 'flex-end';
         let paddingBottom = '10%';
         let paddingTop = '0';
+        let bodyExtraCss = '';
+        let boxExtraCss = '';
         
         if (styleConfig.position === 'top') {
           justifyContent = 'flex-start';
@@ -186,6 +188,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           justifyContent = 'center';
           paddingTop = '0';
           paddingBottom = '0';
+        } else if (styleConfig.position === 'custom') {
+          bodyExtraCss = `position: relative;`;
+          boxExtraCss = `
+            position: absolute;
+            top: ${styleConfig.posY ?? 50}%;
+            left: ${styleConfig.posX ?? 50}%;
+            transform: translate(-50%, -50%);
+            margin: 0 !important;
+          `;
         }
 
         const shadowCSS = styleConfig.shadowColor && styleConfig.shadowColor !== 'transparent'
@@ -219,6 +230,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
               padding-bottom: ${paddingBottom};
               box-sizing: border-box;
               overflow: hidden;
+              ${bodyExtraCss}
             }
             .caption-box {
               font-family: '${fontName}', sans-serif;
@@ -236,6 +248,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
               -webkit-text-stroke: ${strokeCSS};
               text-transform: ${textTransform};
               line-height: 1.3;
+              ${boxExtraCss}
             }
           </style>
         </head>
@@ -258,6 +271,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         // Wait for fonts to load
         await page.evaluateHandle('document.fonts.ready');
 
+        const animation = styleConfig.animation || 'none';
+        const highlightColor = styleConfig.highlightColor || '#FFD700';
+
         const concatLines = ['ffconcat version 1.0'];
         let lastEnd = 0;
 
@@ -265,6 +281,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           const sub = subtitles[i];
           const start = parseFloat(sub.start) || 0;
           const end = parseFloat(sub.end) || 0;
+          const duration = Math.max(0, end - start);
           
           if (start > lastEnd) {
             // Gap between subtitles
@@ -273,16 +290,75 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           }
 
           const text = (sub.text || sub.content || '').trim();
-          await page.evaluate((txt) => {
-            document.getElementById('caption').innerText = txt;
-          }, text);
+          const words = text.split(/\s+/).filter(Boolean);
 
-          const pngName = `frame_${i}.png`;
-          const pngPath = path.join(framesDir, pngName);
-          await page.screenshot({ path: pngPath, omitBackground: true });
+          if (animation === 'none' || words.length === 0) {
+            await page.evaluate((txt) => {
+              const el = document.getElementById('caption');
+              el.style.display = 'block';
+              el.innerText = txt;
+            }, text);
 
-          concatLines.push(`file '${pngName}'`);
-          concatLines.push(`duration ${(end - start).toFixed(3)}`);
+            const pngName = `frame_${i}.png`;
+            const pngPath = path.join(framesDir, pngName);
+            await page.screenshot({ path: pngPath, omitBackground: true });
+
+            concatLines.push(`file '${pngName}'`);
+            concatLines.push(`duration ${duration.toFixed(3)}`);
+          } else {
+            const timePerWord = duration / words.length;
+            
+            for (let w = 0; w < words.length; w++) {
+              await page.evaluate(({ wordsArray, currentIdx, animType, hColor }) => {
+                const container = document.getElementById('caption');
+                container.innerHTML = '';
+                
+                container.style.display = 'flex';
+                container.style.flexWrap = 'wrap';
+                container.style.justifyContent = 'center';
+                container.style.gap = '0.25em';
+                
+                wordsArray.forEach((word, idx) => {
+                  const span = document.createElement('span');
+                  span.innerText = word;
+                  
+                  const isCurrent = idx === currentIdx;
+                  const isPast = idx < currentIdx;
+                  let visible = true;
+                  
+                  switch (animType) {
+                    case 'highlight':
+                      if (isCurrent) span.style.color = hColor;
+                      break;
+                    case 'karaoke':
+                      if (isCurrent || isPast) span.style.color = hColor;
+                      break;
+                    case 'typewriter':
+                      if (idx > currentIdx) visible = false;
+                      break;
+                    case 'scale-up':
+                      if (isCurrent) span.style.transform = 'scale(1.3)';
+                      break;
+                    case 'bounce':
+                      if (isCurrent) span.style.transform = 'translateY(-15px)';
+                      break;
+                  }
+                  
+                  if (visible) {
+                    span.style.display = 'inline-block';
+                    container.appendChild(span);
+                  }
+                });
+              }, { wordsArray: words, currentIdx: w, animType: animation, hColor: highlightColor });
+
+              const pngName = `frame_${i}_w_${w}.png`;
+              const pngPath = path.join(framesDir, pngName);
+              await page.screenshot({ path: pngPath, omitBackground: true });
+
+              concatLines.push(`file '${pngName}'`);
+              concatLines.push(`duration ${timePerWord.toFixed(3)}`);
+            }
+          }
           
           lastEnd = end;
         }

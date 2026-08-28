@@ -47,7 +47,7 @@ def extract_audio_wav(input_path, output_wav_path):
     ]
     try:
         sys.stderr.write(f"[FFmpeg] Extracting 16kHz mono WAV from {os.path.basename(input_path)}...\n")
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
         return res.returncode == 0 and os.path.exists(output_wav_path)
     except Exception as e:
         sys.stderr.write(f"[FFmpeg Audio Extraction Warning] {e}\n")

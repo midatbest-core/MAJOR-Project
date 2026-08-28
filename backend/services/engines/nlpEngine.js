@@ -20,7 +20,7 @@ class NlpEngine {
     try {
       const aiSummaryPromise = Promise.race([
         summarizeTranscript(text),
-        new Promise(resolve => setTimeout(() => resolve(null), 1500))
+        new Promise(resolve => setTimeout(() => resolve(null), 10000))
       ]);
       const aiSummary = await aiSummaryPromise;
       if (aiSummary) {

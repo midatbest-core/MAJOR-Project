@@ -179,6 +179,40 @@ const StylePanel = ({ style, onChangeStyle }) => {
           </div>
         </div>
 
+        {/* Animation & Highlight Color */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-medium text-slate-400 flex items-center gap-1"><MoveVertical className="w-3 h-3 text-emerald-400" /> Animation</label>
+            <select
+              value={style.animation || 'none'}
+              onChange={(e) => handleUpdate('animation', e.target.value)}
+              className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
+            >
+              <option value="none">None (Static)</option>
+              <option value="highlight">Highlight Current Word</option>
+              <option value="karaoke">Karaoke Fill</option>
+              <option value="typewriter">Typewriter</option>
+              <option value="scale-up">Scale Up Word</option>
+              <option value="bounce">Bounce Word</option>
+            </select>
+          </div>
+
+          {['highlight', 'karaoke'].includes(style.animation) && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-medium text-slate-400">Highlight Color</label>
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
+                <input
+                  type="color"
+                  value={style.highlightColor || '#FFD700'}
+                  onChange={(e) => handleUpdate('highlightColor', e.target.value)}
+                  className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
+                />
+                <span className="font-mono text-[10px] text-slate-300">{style.highlightColor || '#FFD700'}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Stroke Border & Drop Shadow Sliders */}
         <div className="grid grid-cols-2 gap-3 pt-1 border-t border-slate-800/80">
           <div className="flex flex-col gap-1">
