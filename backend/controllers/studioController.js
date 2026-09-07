@@ -129,11 +129,11 @@ const transcribeMedia = async (req, res) => {
     }
 
     if (!transcriptSegments || transcriptSegments.length === 0) {
-      const fileName = project?.originalFileName || (filePath ? path.basename(filePath) : 'Uploaded Media');
-      fullText = `Audio track extracted from ${fileName}. Content indexed and speech processed for analytics.`;
-      transcriptSegments = [
-        { start: 0.0, end: 5.0, text: fullText }
-      ];
+      if (project) {
+        project.processingState = 'FAILED';
+        await safeSave(project);
+      }
+      return sendError(res, 'Transcription failed', [{ field: 'file', code: 'NO_SPEECH_DETECTED', description: 'Could not detect speech in the media or transcription failed.' }], 400);
     }
 
     if (project) {

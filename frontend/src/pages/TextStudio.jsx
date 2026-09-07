@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import apiClient from '../services/apiClient';
@@ -51,6 +51,26 @@ const TextStudio = () => {
   const [loading, setLoading] = useState(false);
   const [pipelineStep, setPipelineStep] = useState(0);
   const [stepStatus, setStepStatus] = useState('');
+  const [simulatedProgress, setSimulatedProgress] = useState(0);
+
+  useEffect(() => {
+    let interval;
+    if (loading) {
+      setSimulatedProgress(0);
+      interval = setInterval(() => {
+        setSimulatedProgress(prev => {
+          if (prev >= 99) {
+            clearInterval(interval);
+            return 99;
+          }
+          return prev + 1;
+        });
+      }, 100);
+    } else {
+      setSimulatedProgress(100);
+    }
+    return () => clearInterval(interval);
+  }, [loading]);
 
   // Results State
   const [projectId, setProjectId] = useState(null);
@@ -208,6 +228,19 @@ const TextStudio = () => {
     } finally {
       setLoadingSuggestions(false);
     }
+  };
+
+  const handleImproveWithAI = () => {
+    navigate('/ai-chatbot', {
+      state: {
+        context: {
+          type: 'text-studio',
+          summary: analytics?.summary || '',
+          keywords: analytics?.keywords || [],
+          sentiment: analytics?.sentiment || null
+        }
+      }
+    });
   };
 
   const handleCopyTranscript = () => {
@@ -413,7 +446,7 @@ const TextStudio = () => {
                   </span>
                   <span className="font-mono text-indigo-400">Step {pipelineStep} of 4</span>
                 </div>
-                <ProgressBar progress={pipelineStep * 25} />
+                <ProgressBar progress={simulatedProgress} />
               </div>
             </Card>
           )}
@@ -438,6 +471,14 @@ const TextStudio = () => {
                   >
                     {loadingSuggestions ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 text-indigo-400" />}
                     <span>Generate AI Script Improvements</span>
+                  </button>
+
+                  <button
+                    onClick={handleImproveWithAI}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold hover:opacity-90 transition shadow-lg shadow-orange-500/30"
+                  >
+                    <Sparkles className="w-4 h-4 text-orange-200" />
+                    <span>Improve with AI ✨</span>
                   </button>
 
                   <button

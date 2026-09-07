@@ -19,7 +19,7 @@ const generateLLMText = async (prompt, format = 'text', options = {}) => {
     throw new AppError('Gemini API Key is missing. Please configure it in Settings or backend environment variables.', 500);
   }
 
-  const models = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash'];
+  const models = ['gemini-3.5-flash', 'gemini-flash-latest'];
   let lastError = null;
 
   for (const model of models) {
@@ -117,15 +117,16 @@ Return a strict JSON object with EXACTLY these keys:
 {
   "commentSentiment": { "positive": 75, "neutral": 15, "negative": 10 },
   "aiSummary": "A 2-3 sentence overarching summary of the video's reception and core value delivered.",
-  "positiveSentimentDetails": ["Exact quote or specific detail driving positive reception 1", "Detail 2"],
-  "negativeSentimentDetails": ["Exact pain point, confusion, or critique 1", "Detail 2"],
-  "lovedAspects": ["Loved aspect 1 specific to ${topic}", "Loved aspect 2", "Loved aspect 3"],
+  "positiveSummary": "A clear, concise summary of what people positively loved or praised.",
+  "neutralSummary": "A clear, concise summary of general observations, questions, or neutral remarks.",
+  "negativeSummary": "A clear, concise summary of the core pain points, criticisms, or dislikes.",
+  "lovedAspects": ["Loved aspect 1 specific to ${topic}", "Loved aspect 2"],
   "dislikedAspects": ["Constructive critique 1 for ${topic}", "Critique 2"],
-  "frequentlyRequested": ["Requested follow-up 1 on ${topic}", "Request 2", "Request 3"],
-  "trendingTopics": ["Trending subtopic 1", "Trending subtopic 2", "Trending subtopic 3"],
+  "frequentlyRequested": ["Requested follow-up 1 on ${topic}", "Request 2"],
+  "trendingTopics": ["Trending subtopic 1", "Trending subtopic 2"],
   "targetNicheIdeas": ["Target niche pivot/idea 1", "Target niche idea 2"],
-  "whatWorks": ["Element that works exceptionally well 1", "Element 2"],
-  "whatDoesntWork": ["Element that fails or hurts retention 1", "Element 2"]
+  "whatWorks": ["Element that works exceptionally well 1"],
+  "whatDoesntWork": ["Element that fails or hurts retention 1"]
 }`;
 
   const aiResult = await generateLLMText(prompt, 'json', options);

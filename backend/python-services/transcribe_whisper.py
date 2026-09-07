@@ -58,14 +58,10 @@ def transcribe_audio(file_path):
     Fast, reliable local OpenAI Whisper transcription engine.
     Anti-hallucination configuration: condition_on_previous_text=False prevents infinite phrase loops.
     """
-    filename = os.path.basename(file_path) if file_path else "uploaded_media"
-
     if not file_path or not os.path.exists(file_path):
-        fallback_text = f"Media file {filename} indexed. Speech processing ready."
-        return {
-            "transcript": [{"start": 0.0, "end": 5.0, "text": fallback_text}],
-            "fullText": fallback_text
-        }
+        raise ValueError(f"File path is invalid or file does not exist: {file_path}")
+
+    filename = os.path.basename(file_path)
 
     temp_wav = os.path.join(tempfile.gettempdir(), f"extracted_{os.getpid()}_{os.path.basename(file_path)}.wav")
     target_path = file_path
@@ -78,13 +74,7 @@ def transcribe_audio(file_path):
         if os.path.exists(temp_wav):
             try: os.remove(temp_wav)
             except Exception: pass
-
-        fallback_text = f"Media file {filename} processed. Speech recognition active."
-        return {
-            "transcript": [{"start": 0.0, "end": 5.0, "text": fallback_text}],
-            "fullText": fallback_text,
-            "note": "Whisper module operating in lightweight mode."
-        }
+        raise ImportError("openai-whisper package is not installed or failed to load")
 
     try:
         sys.stderr.write(f"[Whisper] Loading fast local model for {filename}...\n")
@@ -135,8 +125,7 @@ def transcribe_audio(file_path):
         full_text = " ".join([s["text"] for s in segments]).strip()
 
         if not full_text:
-            full_text = f"Audio track extracted from {filename}. Speech processed."
-            segments = [{"start": 0.0, "end": 5.0, "text": full_text}]
+            raise ValueError("Whisper transcription yielded no speech text (empty output)")
             
         sys.stderr.write(f"[Whisper] Transcription completed successfully with {len(segments)} unique segments!\n")
         return {
@@ -145,11 +134,7 @@ def transcribe_audio(file_path):
         }
     except Exception as e:
         sys.stderr.write(f"[Whisper Execution Error] {str(e)}\n")
-        fallback_text = f"Media file {filename} indexed. Speech processing active."
-        return {
-            "transcript": [{"start": 0.0, "end": 5.0, "text": fallback_text}],
-            "fullText": fallback_text
-        }
+        raise
     finally:
         if os.path.exists(temp_wav):
             try:

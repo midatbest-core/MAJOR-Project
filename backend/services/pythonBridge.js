@@ -19,7 +19,9 @@ const runPythonScript = (scriptName, inputPayload = {}, timeoutMs = 20000) => {
 
     console.log(`[Python Bridge] Executing script (${pythonExe}): ${scriptName}`);
     
-    const pyProcess = spawn(pythonExe, [scriptPath, jsonPayload]);
+    // Do not pass jsonPayload as a command-line argument to avoid Windows path length limits (E2BIG).
+    // The python scripts are designed to read from stdin as a fallback.
+    const pyProcess = spawn(pythonExe, [scriptPath]);
 
     let isResolved = false;
 

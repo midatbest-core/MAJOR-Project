@@ -11,8 +11,9 @@ const performNlpCommentAnalysis = (comments = [], videoTitle = '') => {
     return {
       aiSummary: `Overall reception for "${videoTitle}" is generally positive, with audiences showing high engagement but minimal detailed feedback.`,
       commentSentiment: { positive: 70, neutral: 20, negative: 10 },
-      positiveSentimentDetails: [`High interest in "${videoTitle}"`, "Engaging video presentation"],
-      negativeSentimentDetails: ["Pacing could be optimized in middle section", "Audio level variations across segments"],
+      positiveSummary: `Viewers showed high interest in "${videoTitle}".`,
+      neutralSummary: "Most viewers engaged passively without leaving detailed commentary.",
+      negativeSummary: "No significant negative feedback was detected.",
       lovedAspects: [`High interest in "${videoTitle}"`, "Engaging video presentation", "Clear audio and visual quality"],
       dislikedAspects: ["Pacing could be optimized in middle section", "Audio level variations across segments"],
       frequentlyRequested: ["Follow-up breakdown or tutorial", "Links to resources mentioned in video"],
@@ -96,14 +97,9 @@ const performNlpCommentAnalysis = (comments = [], videoTitle = '') => {
       neutral: neutralPct || 20,
       negative: negativePct || 8
     },
-    positiveSentimentDetails: lovedComments.length > 0 ? lovedComments.slice(0, 2) : [
-      `Viewers highly appreciated "${videoTitle.substring(0, 40)}"`,
-      "Engaging content tone and visual presentation"
-    ],
-    negativeSentimentDetails: dislikedComments.length > 0 ? dislikedComments.slice(0, 2) : [
-      "Pacing felt slightly fast during technical sections",
-      "Some viewers requested deeper coverage on edge cases"
-    ],
+    positiveSummary: lovedComments.length > 0 ? `Viewers expressed strong appreciation for "${lovedComments[0].substring(0, 30)}..." and highlighted engaging content delivery.` : "Viewers found the content generally positive and engaging.",
+    neutralSummary: "Many viewers asked questions about specific implementations or requested links to mentioned resources.",
+    negativeSummary: dislikedComments.length > 0 ? `Some friction was observed regarding "${dislikedComments[0].substring(0, 30)}..." with minor pacing critiques.` : "No major negative themes were identified in the comments.",
     lovedAspects: lovedComments.length > 0 ? lovedComments : [
       `Viewers highly appreciated "${videoTitle.substring(0, 40)}"`,
       "Engaging content tone and visual presentation",
@@ -123,8 +119,8 @@ const performNlpCommentAnalysis = (comments = [], videoTitle = '') => {
       `${topKeywords[0] || "Tech"} for Beginners`,
       `Advanced ${topKeywords[1] || "Strategy"} Masterclass`
     ],
-    whatWorks: lovedComments.length > 0 ? ["Audience resonates strongly with " + lovedComments[0].substring(0, 20)] : ["Strong core hook"],
-    whatDoesntWork: dislikedComments.length > 0 ? ["Friction around " + dislikedComments[0].substring(0, 20)] : ["Fast pacing"]
+    whatWorks: lovedComments.length > 0 ? [`Audience resonates strongly with: "${lovedComments[0].length > 100 ? lovedComments[0].substring(0, 100) + '...' : lovedComments[0]}"`] : ["Strong core hook and engaging visuals"],
+    whatDoesntWork: dislikedComments.length > 0 ? [`Friction observed around: "${dislikedComments[0].length > 100 ? dislikedComments[0].substring(0, 100) + '...' : dislikedComments[0]}"`] : ["Pacing might feel slightly fast in some sections"]
   };
 };
 

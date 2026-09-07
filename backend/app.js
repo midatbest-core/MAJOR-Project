@@ -11,6 +11,7 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const studioRoutes = require('./routes/studioRoutes');
 const captionRoutes = require('./routes/captionRoutes');
 const creatorRoutes = require('./routes/creatorRoutes');
+const chatRoutes = require('./routes/chatRoutes');
 
 const app = express();
 
@@ -38,12 +39,14 @@ app.get('/api/health', (req, res) => {
 app.use('/api/v1/text-studio', studioRoutes);
 app.use('/api/v1/caption-studio', captionRoutes);
 app.use('/api/v1/creator-intelligence', creatorRoutes);
+app.use('/api/v1/chat', chatRoutes);
 
 // Backwards Compatible Aliases
 app.use('/api/upload', uploadRoutes);
 app.use('/api', studioRoutes);
 app.use('/api/captions', captionRoutes);
 app.use('/api', creatorRoutes);
+app.use('/api/chat', chatRoutes);
 
 // 404 Route Not Found Middleware
 app.use(notFound);

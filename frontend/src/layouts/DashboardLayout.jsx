@@ -10,7 +10,8 @@ import {
   Menu,
   X,
   Zap,
-  Activity
+  Activity,
+  MessageSquare
 } from 'lucide-react';
 
 const DashboardLayout = () => {
@@ -21,6 +22,7 @@ const DashboardLayout = () => {
     { label: 'Text Studio', path: '/text-studio', icon: FileText },
     { label: 'Caption Studio', path: '/caption-studio', icon: Subtitles },
     { label: 'Creator Intelligence', path: '/creator-intelligence', icon: Sparkles },
+    { label: 'AI Chatbot', path: '/ai-chatbot', icon: MessageSquare },
     { label: 'Settings', path: '/settings', icon: Settings }
   ];
 

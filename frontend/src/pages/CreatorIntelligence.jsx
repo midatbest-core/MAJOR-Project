@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import apiClient from '../services/apiClient';
 import {
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react';
 
 const CreatorIntelligence = () => {
+  const navigate = useNavigate();
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [niche, setNiche] = useState('Programming');
   const [topic, setTopic] = useState('Machine Learning Roadmap');
@@ -63,6 +65,7 @@ const CreatorIntelligence = () => {
       if (ytRes.data.success && ytRes.data.data) {
         setAnalyzedData(ytRes.data.data);
         lastVideoId.current = ytRes.data.data.videoId;
+        localStorage.setItem('latestCreatorIntelligence', JSON.stringify(ytRes.data.data));
       }
 
       // Step 2: Personalized Inspiration & Content Blueprint via API v1
@@ -88,6 +91,18 @@ const CreatorIntelligence = () => {
     navigator.clipboard.writeText(text);
     setCopiedIndex(id);
     setTimeout(() => setCopiedIndex(null), 2000);
+  };
+
+  const handleImproveWithAI = () => {
+    navigate('/ai-chatbot', {
+      state: {
+        context: {
+          type: 'creator-intelligence',
+          title: analyzedData?.metrics?.title || 'Unknown Video',
+          niche: niche || 'Unknown Niche'
+        }
+      }
+    });
   };
 
   return (
@@ -255,6 +270,15 @@ const CreatorIntelligence = () => {
                     <p className="text-sm text-slate-300 leading-relaxed">
                       {analyzedData.audienceIntelligence.aiSummary}
                     </p>
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        onClick={handleImproveWithAI}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold hover:opacity-90 transition shadow-lg shadow-orange-500/30"
+                      >
+                        <Sparkles className="w-4 h-4 text-orange-200" />
+                        <span>Improve with AI ✨</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -302,35 +326,25 @@ const CreatorIntelligence = () => {
                 </div>
               </div>
 
-              {/* Sentiment Quote Details */}
-              {(analyzedData.audienceIntelligence.positiveSentimentDetails?.length > 0 || analyzedData.audienceIntelligence.negativeSentimentDetails?.length > 0) && (
+              {/* Sentiment AI Summaries */}
+              {(analyzedData.audienceIntelligence.positiveSummary || analyzedData.audienceIntelligence.negativeSummary) && (
                 <div className="pt-4 border-t border-slate-800 mt-4 space-y-3">
-                  {analyzedData.audienceIntelligence.positiveSentimentDetails?.length > 0 && (
-                    <div>
+                  {analyzedData.audienceIntelligence.positiveSummary && (
+                    <div className="bg-emerald-500/5 p-3 rounded-xl border border-emerald-500/10">
                       <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block mb-1">Top Positive Feedback</span>
-                      <ul className="space-y-1">
-                        {analyzedData.audienceIntelligence.positiveSentimentDetails.map((quote, idx) => (
-                          <li key={idx} className="text-xs text-slate-300 italic flex items-start gap-1.5">
-                            <span className="text-emerald-500 font-serif">"</span>
-                            {quote}
-                            <span className="text-emerald-500 font-serif">"</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <p className="text-xs text-slate-300 leading-relaxed">{analyzedData.audienceIntelligence.positiveSummary}</p>
                     </div>
                   )}
-                  {analyzedData.audienceIntelligence.negativeSentimentDetails?.length > 0 && (
-                    <div>
+                  {analyzedData.audienceIntelligence.neutralSummary && (
+                    <div className="bg-blue-500/5 p-3 rounded-xl border border-blue-500/10">
+                      <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block mb-1">Neutral & General Remarks</span>
+                      <p className="text-xs text-slate-300 leading-relaxed">{analyzedData.audienceIntelligence.neutralSummary}</p>
+                    </div>
+                  )}
+                  {analyzedData.audienceIntelligence.negativeSummary && (
+                    <div className="bg-rose-500/5 p-3 rounded-xl border border-rose-500/10">
                       <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block mb-1">Core Pain Points</span>
-                      <ul className="space-y-1">
-                        {analyzedData.audienceIntelligence.negativeSentimentDetails.map((quote, idx) => (
-                          <li key={idx} className="text-xs text-slate-300 italic flex items-start gap-1.5">
-                            <span className="text-rose-500 font-serif">"</span>
-                            {quote}
-                            <span className="text-rose-500 font-serif">"</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <p className="text-xs text-slate-300 leading-relaxed">{analyzedData.audienceIntelligence.negativeSummary}</p>
                     </div>
                   )}
                 </div>

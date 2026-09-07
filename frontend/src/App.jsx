@@ -9,6 +9,7 @@ import CaptionStudio from './pages/CaptionStudio';
 import CreatorIntelligence from './pages/CreatorIntelligence';
 import Downloads from './pages/Downloads';
 import Settings from './pages/Settings';
+import AIChatbot from './pages/AIChatbot';
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
             <Route path="caption-studio" element={<CaptionStudio />} />
             <Route path="captions" element={<CaptionStudio />} />
             <Route path="creator-intelligence" element={<CreatorIntelligence />} />
+            <Route path="ai-chatbot" element={<AIChatbot />} />
             <Route path="downloads" element={<Downloads />} />
             <Route path="settings" element={<Settings />} />
           </Route>
