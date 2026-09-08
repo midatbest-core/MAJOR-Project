@@ -3,22 +3,30 @@ import { Settings as SettingsIcon, ShieldCheck, Database, Key, Server, Save } fr
 import toast from 'react-hot-toast';
 
 const Settings = () => {
+  const [openAiKey, setOpenAiKey] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [groqKey, setGroqKey] = useState('');
   const [youtubeKey, setYoutubeKey] = useState('');
   const [pythonExe, setPythonExe] = useState('python');
 
   useEffect(() => {
+    const savedOpenAiKey = localStorage.getItem('OPENAI_API_KEY') || '';
     const savedGeminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
+    const savedGroqKey = localStorage.getItem('GROQ_API_KEY') || '';
     const savedYoutubeKey = localStorage.getItem('YOUTUBE_API_KEY') || '';
     const savedPythonPath = localStorage.getItem('PYTHON_PATH') || 'python';
     
+    setOpenAiKey(savedOpenAiKey);
     setApiKey(savedGeminiKey);
+    setGroqKey(savedGroqKey);
     setYoutubeKey(savedYoutubeKey);
     setPythonExe(savedPythonPath);
   }, []);
 
   const handleSave = () => {
+    localStorage.setItem('OPENAI_API_KEY', openAiKey);
     localStorage.setItem('GEMINI_API_KEY', apiKey);
+    localStorage.setItem('GROQ_API_KEY', groqKey);
     localStorage.setItem('YOUTUBE_API_KEY', youtubeKey);
     localStorage.setItem('PYTHON_PATH', pythonExe);
     toast.success('Settings saved successfully!');
@@ -32,6 +40,37 @@ const Settings = () => {
       </div>
 
       <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-6 max-w-2xl">
+        {/* OpenAI ChatGPT API Key */}
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+            <Key className="w-4 h-4 text-sky-400" />
+            <span>OpenAI ChatGPT API Key (GPT-4o / GPT-4o-mini)</span>
+          </label>
+          <input
+            type="password"
+            value={openAiKey}
+            onChange={(e) => setOpenAiKey(e.target.value)}
+            placeholder="sk-proj-..."
+            className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm focus:outline-none focus:border-sky-500"
+          />
+          <p className="text-slate-500 text-xs">Used for elite ChatGPT-powered Creator Intelligence and context-aware chat (or configure via OPENAI_API_KEY in .env).</p>
+        </div>
+        {/* Groq API Key */}
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+            <Key className="w-4 h-4 text-emerald-400" />
+            <span>Groq LPU API Key (Llama 3.3 Sentiment & Summary)</span>
+          </label>
+          <input
+            type="password"
+            value={groqKey}
+            onChange={(e) => setGroqKey(e.target.value)}
+            placeholder="gsk_..."
+            className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm focus:outline-none focus:border-emerald-500"
+          />
+          <p className="text-slate-500 text-xs">Used for fast, contextual sentiment analysis and 2-sentence executive summaries (or configure via GROQ_API_KEY in .env).</p>
+        </div>
+
         {/* YouTube API Key */}
         <div className="space-y-2">
           <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">

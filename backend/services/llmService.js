@@ -1,3 +1,4 @@
+require('../config/environment');
 const axios = require('axios');
 const AppError = require('../shared/AppError');
 
@@ -14,49 +15,68 @@ const cleanJsonString = (raw) => {
 };
 
 const generateLLMText = async (prompt, format = 'text', options = {}) => {
-  const apiKey = options.geminiApiKey || process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  const rawUserKey = options.geminiApiKey;
+  const userKey = (typeof rawUserKey === 'string' ? rawUserKey.trim() : '');
+  const envKey = (process.env.GEMINI_API_KEY || '').trim();
+
+  const candidateKeys = [];
+  if (userKey && userKey !== 'undefined' && userKey !== 'null') {
+    candidateKeys.push(userKey);
+  }
+  if (envKey && !candidateKeys.includes(envKey)) {
+    candidateKeys.push(envKey);
+  }
+
+  if (candidateKeys.length === 0) {
     throw new AppError('Gemini API Key is missing. Please configure it in Settings or backend environment variables.', 500);
   }
 
-  const models = ['gemini-3.5-flash', 'gemini-flash-latest'];
+  const models = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
   let lastError = null;
 
-  for (const model of models) {
-    try {
-      const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          contents: [{
-            parts: [{ text: prompt }]
-          }]
-        },
-        { timeout: 15000 }
-      );
+  for (const apiKey of candidateKeys) {
+    for (const model of models) {
+      try {
+        const response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            contents: [{
+              parts: [{ text: prompt }]
+            }]
+          },
+          { timeout: 7000 }
+        );
 
-      const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) continue;
+        const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) continue;
 
-      if (format === 'json') {
-        const jsonStr = cleanJsonString(text);
-        try {
-          return JSON.parse(jsonStr);
-        } catch (e) {
-          // If JSON parse fails, continue to next model attempt
+        if (format === 'json') {
+          const jsonStr = cleanJsonString(text);
+          try {
+            return JSON.parse(jsonStr);
+          } catch (e) {
+            // If JSON parse fails, continue to next model attempt
+            continue;
+          }
         }
-      }
-      return text.trim();
-    } catch (err) {
-      lastError = err;
-      if (err.response?.status === 429) {
-        console.warn(`[LLM Service] Gemini ${model} rate-limited (429).`);
-      } else if (err.response?.status !== 404) {
-        console.warn(`[LLM Service] Gemini ${model} error: ${err.message}`);
+        return text.trim();
+      } catch (err) {
+        lastError = err;
+        const status = err.response?.status;
+        if (status === 429) {
+          console.warn(`[LLM Service] Gemini ${model} rate-limited (429).`);
+        } else if (status === 400 || status === 401 || status === 403) {
+          console.warn(`[LLM Service] Gemini key ${apiKey.substring(0, 6)}... invalid or unauthorized (${status}).`);
+          // Stop trying this invalid key and move to next candidate key
+          break;
+        } else if (status !== 404) {
+          console.warn(`[LLM Service] Gemini ${model} error: ${err.message}`);
+        }
       }
     }
   }
   
-  throw new AppError(`AI Generation failed: ${lastError ? lastError.message : 'Unknown error'}`, 500);
+  throw new AppError(`AI Generation failed: ${lastError ? (lastError.response?.data?.error?.message || lastError.message) : 'Unknown error'}`, 500);
 };
 
 const summarizeTranscript = async (text, projectTitle = '', options = {}) => {
@@ -84,6 +104,16 @@ Rules:
 const generateScriptImprovements = async (scriptText, options = {}) => {
   if (!scriptText || scriptText.length < 10) throw new AppError('Script too short to improve.', 400);
 
+  // 1. Try Groq for fast script improvement
+  try {
+    const { generateScriptImprovementsWithGroq } = require('./groqService');
+    const groqRes = await generateScriptImprovementsWithGroq(scriptText, options);
+    if (groqRes && groqRes.hookEnhancement) return groqRes;
+  } catch (groqErr) {
+    console.warn('[Script Improvement] Groq attempt skipped:', groqErr.message);
+  }
+
+  // 2. Fallback to Gemini LLM
   const prompt = `Act as an Elite YouTube Script Consultant & Senior Copywriter.
 Analyze the following script/transcript:
 "${scriptText.substring(0, 3000)}"
@@ -103,6 +133,16 @@ Provide specific, actionable script improvements in this strict JSON structure:
 };
 
 const analyzeAudienceComments = async ({ title, comments = [], niche, topic }, options = {}) => {
+  // 1. Try Groq for high-speed audience intelligence
+  try {
+    const { generateAudienceAnalysisWithGroq } = require('./groqService');
+    const groqRes = await generateAudienceAnalysisWithGroq({ title, comments, niche, topic }, options);
+    if (groqRes && groqRes.commentSentiment && groqRes.aiSummary) return groqRes;
+  } catch (groqErr) {
+    console.warn('[Audience Intelligence] Groq attempt notice:', groqErr.message);
+  }
+
+  // 2. Fallback to Gemini
   const commentText = comments.length > 0 ? comments.slice(0, 100).join('\n') : `Video title: ${title}`;
   
   const prompt = `You are an AI Audience Intelligence Analyst for YouTube content.

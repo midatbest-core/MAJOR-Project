@@ -11,3 +11,14 @@ __pycache__/
 
 # Environment variables
 .env
+
+# Media Uploads & Rendered Videos
+backend/uploads/
+uploads/
+*.mp4
+*.mkv
+*.webm
+
+# Logs
+backend/logs/
+*.log

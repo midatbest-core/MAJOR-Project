@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import apiClient from '../services/apiClient';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import { 
   Send, 
   Bot, 
@@ -8,7 +11,8 @@ import {
   Sparkles, 
   FileText, 
   Copy,
-  ThumbsUp
+  ThumbsUp,
+  RotateCcw
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -27,30 +31,36 @@ const AIChatbot = () => {
   const [contextData, setContextData] = useState(null);
   
   const messagesEndRef = useRef(null);
+  const contextInitializedRef = useRef(false);
 
-  // Initialize with context if provided via navigation state
+  // Initialize with context if provided via navigation state (prevent duplicate prints)
   useEffect(() => {
-    if (location.state && location.state.context) {
+    if (location.state && location.state.context && !contextInitializedRef.current) {
+      contextInitializedRef.current = true;
       const ctx = location.state.context;
       setContextData(ctx);
       
       let contextMsg = "I notice you brought some context with you:\n\n";
       if (ctx.type === 'text-studio') {
-        contextMsg += `**Summary:** ${ctx.summary}\n**Keywords:** ${ctx.keywords.join(', ')}\n\nWhat would you like me to do with this? (e.g., "Turn this into a Twitter thread" or "Give me 3 YouTube titles")`;
+        const kw = Array.isArray(ctx.keywords) ? ctx.keywords.join(', ') : '';
+        contextMsg += `**Summary:** ${ctx.summary || 'Transcript summary ready'}\n**Keywords:** ${kw || 'N/A'}\n\nWhat would you like me to do with this? (e.g., "Give me 5 viral YouTube titles" or "Rewrite the opening hook")`;
       } else if (ctx.type === 'creator-intelligence') {
-        contextMsg += `**Video:** ${ctx.title}\n**Niche:** ${ctx.niche}\n\nWould you like me to analyze the pacing, or rewrite the hook based on this video?`;
+        contextMsg += `**Video:** ${ctx.title || 'Creator Video'}\n**Niche:** ${ctx.niche || 'General'}\n\nWould you like me to analyze the pacing, or rewrite the hook based on this video?`;
       }
 
-      setMessages(prev => [
-        ...prev,
-        {
-          id: 'context',
-          role: 'assistant',
-          content: contextMsg,
-          timestamp: new Date().toISOString(),
-          isContext: true
-        }
-      ]);
+      setMessages(prev => {
+        if (prev.some(m => m.isContext)) return prev;
+        return [
+          ...prev,
+          {
+            id: 'context_init',
+            role: 'assistant',
+            content: contextMsg,
+            timestamp: new Date().toISOString(),
+            isContext: true
+          }
+        ];
+      });
     }
   }, [location.state]);
 
@@ -62,27 +72,30 @@ const AIChatbot = () => {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const handleSend = async (e) => {
-    e?.preventDefault();
-    if (!input.trim()) return;
+  const sendMessage = async (textToSend) => {
+    if (!textToSend || !textToSend.trim() || isTyping) return;
 
     const userMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: textToSend.trim(),
       timestamp: new Date().toISOString()
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     setInput('');
     setIsTyping(true);
 
     try {
       const res = await apiClient.post('/chat', {
-        messages: [...messages, userMessage]
+        messages: newMessages
       });
       
       const aiResponse = res.data.data?.reply || res.data?.reply || "I couldn't generate a response.";
+      const isFallback = res.data.data?.isFallback || false;
+      const provider = res.data.data?.provider || '';
+      const model = res.data.data?.model || '';
       
       setMessages(prev => [
         ...prev,
@@ -90,18 +103,24 @@ const AIChatbot = () => {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
           content: aiResponse,
+          isFallback,
+          provider,
+          model,
           timestamp: new Date().toISOString()
         }
       ]);
     } catch (err) {
       console.error('Chat error:', err);
-      toast.error(err.response?.data?.errors?.[0]?.description || err.response?.data?.message || 'Failed to connect to AI');
+      const errMsg = err.response?.data?.errors?.[0]?.description || err.response?.data?.message || 'Failed to connect to AI';
+      toast.error(errMsg);
       setMessages(prev => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: "Sorry, I ran into an error connecting to my brain. Please try again.",
+          content: "Sorry, I ran into a temporary connection issue. Please click Retry below to try again.",
+          isError: true,
+          retryContent: textToSend.trim(),
           timestamp: new Date().toISOString()
         }
       ]);
@@ -110,13 +129,26 @@ const AIChatbot = () => {
     }
   };
 
+  const handleSend = (e) => {
+    e?.preventDefault();
+    sendMessage(input);
+  };
+
   const handleAttachTextStudio = () => {
     try {
       const data = localStorage.getItem('activeStudioProject');
       if (data) {
         const parsed = JSON.parse(data);
-        const contextMsg = `I've attached Text Studio data:\n\n**Video/Script:** ${parsed.originalFileName}\n**Transcript Snippet:** ${parsed.fullText.substring(0, 300)}...\n\nWhat would you like me to do with this?`;
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: contextMsg, timestamp: new Date().toISOString(), isContext: true }]);
+        const snippet = parsed.fullText ? parsed.fullText.substring(0, 300) : '';
+        const contextMsg = `I've attached Text Studio data:\n\n**Video/Script:** ${parsed.originalFileName || 'Current Project'}\n**Transcript Snippet:** ${snippet}...\n\nWhat would you like me to do with this?`;
+        
+        setMessages(prev => {
+          const filtered = prev.filter(m => !m.isContext);
+          return [
+            ...filtered,
+            { id: `context_${Date.now()}`, role: 'assistant', content: contextMsg, timestamp: new Date().toISOString(), isContext: true }
+          ];
+        });
         setContextData({ type: 'text-studio' });
         toast.success('Text Studio Context Attached');
       } else {
@@ -132,8 +164,15 @@ const AIChatbot = () => {
       const data = localStorage.getItem('latestCreatorIntelligence');
       if (data) {
         const parsed = JSON.parse(data);
-        const contextMsg = `I've attached Creator Intelligence data:\n\n**Video Title:** ${parsed.metrics?.title}\n**Engagement Rate:** ${parsed.metrics?.engagementRate}%\n**Summary:** ${parsed.audienceIntelligence?.aiSummary}\n\nHow can I help you optimize based on this?`;
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: contextMsg, timestamp: new Date().toISOString(), isContext: true }]);
+        const contextMsg = `I've attached Creator Intelligence data:\n\n**Video Title:** ${parsed.metrics?.title || 'YouTube Video'}\n**Engagement Rate:** ${parsed.metrics?.engagementRate || 0}%\n**Summary:** ${parsed.audienceIntelligence?.aiSummary || 'Analytics ready'}\n\nHow can I help you optimize based on this?`;
+        
+        setMessages(prev => {
+          const filtered = prev.filter(m => !m.isContext);
+          return [
+            ...filtered,
+            { id: `context_${Date.now()}`, role: 'assistant', content: contextMsg, timestamp: new Date().toISOString(), isContext: true }
+          ];
+        });
         setContextData({ type: 'creator-intelligence' });
         toast.success('Creator Intelligence Context Attached');
       } else {
@@ -189,18 +228,85 @@ const AIChatbot = () => {
                   ? 'bg-slate-900/80 border border-slate-700/50 text-slate-200 rounded-tl-sm'
                   : 'bg-slate-800 border border-slate-700/50 text-slate-200 rounded-tl-sm'
             }`}>
-              <div className="whitespace-pre-wrap text-sm leading-relaxed font-medium">
-                {msg.content}
-              </div>
+              {msg.role === 'user' ? (
+                <div className="whitespace-pre-wrap text-sm leading-relaxed font-medium">
+                  {msg.content}
+                </div>
+              ) : (
+                <div className="text-sm leading-relaxed font-normal text-slate-200">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeRaw]}
+                    components={{
+                      table: ({ node, ...props }) => (
+                        <div className="overflow-x-auto my-3 rounded-xl border border-slate-700/80 bg-slate-900/90 shadow-lg">
+                          <table className="min-w-full divide-y divide-slate-700/80 text-left text-xs" {...props} />
+                        </div>
+                      ),
+                      thead: ({ node, ...props }) => <thead className="bg-slate-800/90 text-indigo-300 font-bold uppercase tracking-wider text-[11px]" {...props} />,
+                      tbody: ({ node, ...props }) => <tbody className="divide-y divide-slate-800/70" {...props} />,
+                      tr: ({ node, ...props }) => <tr className="hover:bg-slate-800/50 transition-colors" {...props} />,
+                      th: ({ node, ...props }) => <th className="px-3.5 py-2.5 font-semibold text-white" {...props} />,
+                      td: ({ node, ...props }) => <td className="px-3.5 py-2.5 leading-relaxed align-top text-slate-300" {...props} />,
+                      h1: ({ node, ...props }) => <h1 className="text-base font-bold text-white mt-4 mb-2 border-b border-slate-700/50 pb-1" {...props} />,
+                      h2: ({ node, ...props }) => <h2 className="text-sm font-bold text-indigo-300 mt-3 mb-1.5 flex items-center gap-1.5" {...props} />,
+                      h3: ({ node, ...props }) => <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider mt-3 mb-1" {...props} />,
+                      ul: ({ node, ...props }) => <ul className="list-disc pl-5 my-2 space-y-1 text-slate-300" {...props} />,
+                      ol: ({ node, ...props }) => <ol className="list-decimal pl-5 my-2 space-y-1 text-slate-300" {...props} />,
+                      li: ({ node, ...props }) => <li className="leading-relaxed" {...props} />,
+                      p: ({ node, ...props }) => <p className="my-1.5 leading-relaxed" {...props} />,
+                      strong: ({ node, ...props }) => <strong className="font-bold text-white" {...props} />,
+                      code: ({ node, inline, ...props }) => inline ? (
+                        <code className="bg-slate-900 text-amber-300 px-1.5 py-0.5 rounded text-xs font-mono border border-slate-700/50" {...props} />
+                      ) : (
+                        <code className="block bg-slate-900 text-slate-200 p-3 rounded-xl text-xs font-mono overflow-x-auto my-2 border border-slate-800" {...props} />
+                      ),
+                      blockquote: ({ node, ...props }) => (
+                        <blockquote className="border-l-2 border-indigo-500 pl-3 italic text-slate-400 my-2" {...props} />
+                      ),
+                      hr: ({ node, ...props }) => <hr className="border-slate-700/60 my-3" {...props} />
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
+              )}
               
               {msg.role === 'assistant' && (
                 <div className="mt-3 pt-3 border-t border-slate-700/50 flex items-center gap-3">
-                  <button onClick={() => copyToClipboard(msg.content)} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition">
-                    <Copy className="w-3.5 h-3.5" /> Copy
-                  </button>
-                  <button className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition">
-                    <ThumbsUp className="w-3.5 h-3.5" /> Helpful
-                  </button>
+                  {msg.isError ? (
+                    <button 
+                      onClick={() => sendMessage(msg.retryContent)} 
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/20 text-xs text-amber-300 hover:bg-amber-500/30 border border-amber-500/30 font-semibold transition"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" /> Retry Request
+                    </button>
+                  ) : (
+                    <>
+                      <button onClick={() => copyToClipboard(msg.content)} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition">
+                        <Copy className="w-3.5 h-3.5" /> Copy
+                      </button>
+                      <button className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition">
+                        <ThumbsUp className="w-3.5 h-3.5" /> Helpful
+                      </button>
+                      {msg.model ? (
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-mono ml-auto flex items-center gap-1 font-semibold ${
+                          msg.provider === 'OpenAI' 
+                            ? 'bg-sky-500/10 text-sky-400 border border-sky-500/30'
+                            : msg.provider === 'Groq'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-purple-500/10 text-purple-400 border border-purple-500/30'
+                        }`}>
+                          <Sparkles className="w-2.5 h-2.5" />
+                          {msg.model}
+                        </span>
+                      ) : msg.isFallback ? (
+                        <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-700/50 font-mono ml-auto">
+                          ⚡ Co-Pilot Intelligence
+                        </span>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -247,8 +353,12 @@ const AIChatbot = () => {
           </button>
         </form>
         <div className="flex gap-2 mt-3 overflow-x-auto pb-2 scrollbar-none items-center">
-          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider shrink-0 mr-1">Suggestions:</span>
-          {['Generate 3 YouTube Titles', 'Write a Twitter Thread', 'What are good hashtags?'].map((suggestion) => (
+          {[
+            '5 High-CTR YouTube Titles',
+            'First-5s Retention Hook',
+            'Shorts / Reels Pacing Script',
+            'Thumbnail + Title A/B Angles'
+          ].map((suggestion) => (
             <button 
               key={suggestion}
               type="button"

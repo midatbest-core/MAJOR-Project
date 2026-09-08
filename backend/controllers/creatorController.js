@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const PipelineOrchestrator = require('../services/orchestrator');
 const { sendSuccess, sendError } = require('../utils/responseHandler');
 
@@ -56,8 +57,12 @@ const generateInspiration = async (req, res) => {
 const clearCache = async (req, res) => {
   try {
     const { videoId } = req.params;
-    if (videoId) {
-      await require('../models/YouTubeCache').deleteOne({ videoId });
+    if (videoId && mongoose.connection.readyState === 1) {
+      try {
+        await require('../models/YouTubeCache').deleteOne({ videoId });
+      } catch (dbErr) {
+        console.warn('[Creator Cache Clear Notice]', dbErr.message);
+      }
     }
     return sendSuccess(res, null, 'Cache cleared successfully');
   } catch (err) {

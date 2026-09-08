@@ -15,11 +15,28 @@ apiClient.interceptors.request.use((config) => {
     config.headers['Content-Type'] = 'application/json';
   }
 
-  // Inject API keys from Settings if they exist
-  const geminiKey = localStorage.getItem('GEMINI_API_KEY');
-  const youtubeKey = localStorage.getItem('YOUTUBE_API_KEY');
-  if (geminiKey) config.headers['X-Gemini-Key'] = geminiKey;
-  if (youtubeKey) config.headers['X-YouTube-Key'] = youtubeKey;
+  // Inject API keys from Settings if they exist and are valid
+  const rawOpenAiKey = localStorage.getItem('OPENAI_API_KEY');
+  const rawGeminiKey = localStorage.getItem('GEMINI_API_KEY');
+  const rawGroqKey = localStorage.getItem('GROQ_API_KEY');
+  const rawYoutubeKey = localStorage.getItem('YOUTUBE_API_KEY');
+  const openAiKey = rawOpenAiKey ? rawOpenAiKey.trim() : '';
+  const geminiKey = rawGeminiKey ? rawGeminiKey.trim() : '';
+  const groqKey = rawGroqKey ? rawGroqKey.trim() : '';
+  const youtubeKey = rawYoutubeKey ? rawYoutubeKey.trim() : '';
+
+  if (openAiKey && openAiKey !== 'undefined' && openAiKey !== 'null') {
+    config.headers['X-OpenAI-Key'] = openAiKey;
+  }
+  if (geminiKey && geminiKey !== 'undefined' && geminiKey !== 'null') {
+    config.headers['X-Gemini-Key'] = geminiKey;
+  }
+  if (groqKey && groqKey !== 'undefined' && groqKey !== 'null') {
+    config.headers['X-Groq-Key'] = groqKey;
+  }
+  if (youtubeKey && youtubeKey !== 'undefined' && youtubeKey !== 'null') {
+    config.headers['X-YouTube-Key'] = youtubeKey;
+  }
 
   return config;
 }, (error) => {

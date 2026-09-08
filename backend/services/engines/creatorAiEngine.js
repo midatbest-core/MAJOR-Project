@@ -85,17 +85,34 @@ Respond strictly in valid JSON format.`;
   // Convenience wrapper functions
   static async generateTitles(topic, niche = 'General', count = 3) {
     const res = await this.executeAiTask('generate_titles', { topic, niche }, { count });
-    return res.outputs;
+    if (Array.isArray(res.outputs)) {
+      if (res.outputs.length === 1 && res.outputs[0] && Array.isArray(res.outputs[0].titles)) {
+        return res.outputs[0].titles;
+      }
+      return res.outputs.map(item => (typeof item === 'string' ? item : (item.title || JSON.stringify(item))));
+    }
+    return [];
   }
 
   static async generateDescription(topic, niche = 'General') {
     const res = await this.executeAiTask('generate_description', { topic, niche });
-    return res.outputs[0] || '';
+    const output = res.outputs && res.outputs.length > 0 ? res.outputs[0] : '';
+    if (typeof output === 'string') return output;
+    if (output && typeof output.description === 'string') return output.description;
+    if (output && typeof output.output === 'string') return output.output;
+    if (output && Array.isArray(output.description)) return output.description.join('\n');
+    return typeof output === 'object' ? Object.values(output).join('\n') : String(output || '');
   }
 
   static async generateHashtags(topic, niche = 'General') {
     const res = await this.executeAiTask('generate_hashtags', { topic, niche });
-    return res.outputs;
+    if (Array.isArray(res.outputs)) {
+      if (res.outputs.length === 1 && res.outputs[0] && Array.isArray(res.outputs[0].hashtags)) {
+        return res.outputs[0].hashtags;
+      }
+      return res.outputs.flatMap(item => (typeof item === 'string' ? item : (item.hashtags || [JSON.stringify(item)])));
+    }
+    return [];
   }
 
   /**

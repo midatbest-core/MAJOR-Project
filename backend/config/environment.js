@@ -13,6 +13,8 @@ const environment = {
   port: parseInt(process.env.PORT || '5000', 10),
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ai_creator_dashboard',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
+  groqApiKey: process.env.GROQ_API_KEY || '',
+  openAiApiKey: process.env.OPENAI_API_KEY || '',
   youtubeApiKey: process.env.YOUTUBE_API_KEY || '',
   pythonPath: process.env.PYTHON_PATH || 'python',
   isProduction: process.env.NODE_ENV === 'production',

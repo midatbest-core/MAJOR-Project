@@ -1,15 +1,16 @@
 const { runPythonScript } = require('../pythonBridge');
+const { analyzeSentimentWithGroq, generateSummaryWithGroq } = require('../groqService');
 
 /**
  * Feature Module: NLP Engine
- * Delegates deterministic NLP analysis to Python, strictly adhering to the EDS (Chapter 10).
- * Uses spaCy, NLTK, scikit-learn, textstat, and vaderSentiment.
+ * Delegates deterministic NLP analysis to Python (spaCy, scikit-learn, textstat)
+ * and enhances with Groq LPU AI for ultra-accurate sentiment and summarization.
  */
 class NlpEngine {
   /**
-   * Run NLP analysis using the Python bridge
+   * Run NLP analysis using Python bridge + Groq AI acceleration
    */
-  static async analyzeText(text, audioDurationSeconds = null) {
+  static async analyzeText(text, audioDurationSeconds = null, options = {}) {
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
       throw new Error('No text provided for NLP analysis');
     }
@@ -20,6 +21,7 @@ class NlpEngine {
         duration: audioDurationSeconds
       };
 
+      // 1. Run Python NLP for core metrics (Readability, TF-IDF keywords, WPM, sentence counts)
       const result = await runPythonScript('nlp_analyzer.py', payload, 30000);
 
       if (result.error) {
@@ -30,16 +32,36 @@ class NlpEngine {
         throw new Error('Invalid NLP response from Python engine');
       }
 
+      let summary = result.analytics.summary || '';
+      let sentiment = result.analytics.sentiment || {
+        polarity: 0,
+        label: 'Neutral',
+        positive: 33,
+        neutral: 34,
+        negative: 33
+      };
+
+      // 2. Enhance with Groq AI for high-accuracy contextual sentiment & executive summary
+      try {
+        const [groqSentiment, groqSummary] = await Promise.all([
+          analyzeSentimentWithGroq(text, options),
+          generateSummaryWithGroq(text, options)
+        ]);
+
+        if (groqSentiment) {
+          sentiment = groqSentiment;
+        }
+        if (groqSummary) {
+          summary = groqSummary;
+        }
+      } catch (aiErr) {
+        console.warn('[NLP Engine] Groq AI analysis notice:', aiErr.message);
+      }
+
       return {
-        summary: result.analytics.summary || '',
+        summary,
         keywords: result.analytics.keywords || [],
-        sentiment: result.analytics.sentiment || {
-          polarity: 0,
-          label: 'Neutral',
-          positive: 33,
-          neutral: 34,
-          negative: 33
-        },
+        sentiment,
         readability: {
           fleschReadingEase: result.analytics.readabilityScore || 0,
           gradeLevel: result.analytics.readabilityGrade || 'Unknown',

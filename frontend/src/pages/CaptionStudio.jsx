@@ -875,6 +875,11 @@ const CaptionStudio = () => {
               onChangeStyle={setStyle}
               aspectRatio={aspectRatio}
               onChangeAspectRatio={setAspectRatio}
+              onUpdateActiveText={(newText) => {
+                if (activeSegment) {
+                  handleUpdateSegment(activeSegment.id, 'text', newText);
+                }
+              }}
             />
 
             {/* Subtitle Style Presets & Controls */}

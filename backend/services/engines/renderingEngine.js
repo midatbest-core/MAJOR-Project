@@ -61,7 +61,13 @@ class RenderingEngine {
     const fontName = styleConfig.fontFamily || 'Arial';
     const fontSize = styleConfig.fontSize || 28;
     const primaryColor = styleConfig.primaryColor ? this.hexToAssColor(styleConfig.primaryColor) : '&H00FFFFFF';
-    const backColor = styleConfig.backgroundColor ? this.hexToAssColor(styleConfig.backgroundColor, styleConfig.backgroundOpacity || 0.75) : '&H80000000';
+    const isTransparent = styleConfig.transparentBg === true || 
+      styleConfig.backgroundOpacity === 0 || 
+      styleConfig.backgroundColor === 'transparent' || 
+      !styleConfig.backgroundColor;
+    const backColor = !isTransparent && styleConfig.backgroundColor 
+      ? this.hexToAssColor(styleConfig.backgroundColor, styleConfig.backgroundOpacity ?? 0.75) 
+      : '&HFF000000';
     const strokeColor = styleConfig.strokeColor ? this.hexToAssColor(styleConfig.strokeColor) : '&H00000000';
 
     const header = `[Script Info]
@@ -119,11 +125,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   static getVideoInfo(ffmpegBin, videoPath) {
     return new Promise((resolve) => {
       exec(`"${ffmpegBin}" -i "${videoPath}"`, (err, stdout, stderr) => {
-        const match = stderr.match(/Video:.* (\d{3,4})x(\d{3,4})/);
+        const text = (stderr || '') + (stdout || '') + (err?.message || '');
+        const match = text.match(/Video:.* (\d{3,4})x(\d{3,4})/);
         if (match) {
           resolve({ width: parseInt(match[1], 10), height: parseInt(match[2], 10) });
         } else {
-          resolve({ width: 1080, height: 1920 }); // Fallback to 1080p vertical
+          resolve({ width: 720, height: 1280 }); // Standard vertical default
         }
       });
     });
@@ -140,7 +147,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   }
 
   /**
-   * Burn subtitles onto video using Headless Chromium for 100% pixel-perfect CSS rendering
+   * Burn subtitles onto video using Headless Chromium with 100% pixel-perfect 1:1 match to Preview Canvas
    */
   static renderBurnedVideo(videoPath, subtitles, styleConfig = {}) {
     return new Promise(async (resolve) => {
@@ -155,9 +162,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return resolve({ videoUrl: videoPath, isFallback: true });
       }
 
-      // Calculate dynamic scale factor to perfectly match CSS browser preview size
-      const { width, height } = await this.getVideoInfo(ffmpegBin, videoPath);
-      const scale = height / 600; // CSS preview is roughly 600px tall
+      // Determine video resolution and target output resolution
+      const { width: srcW, height: srcH } = await this.getVideoInfo(ffmpegBin, videoPath);
+
+      // If video is low-resolution (< 720p), upscale canvas to minimum 720p for crisp creator export
+      let targetW = srcW;
+      let targetH = srcH;
+      if (targetW < 720) {
+        targetW = 720;
+        targetH = Math.round((srcH / srcW) * 720);
+        if (targetH % 2 !== 0) targetH++;
+      }
+      if (targetW % 2 !== 0) targetW++;
+
+      // Preview canvas base dimension: 340px for vertical (9:16), 640px for landscape (16:9), 400px for square
+      const basePreviewW = targetH >= targetW ? 340 : (Math.abs(targetW - targetH) < 50 ? 400 : 640);
+      const scale = targetW / basePreviewW;
 
       const tempDir = path.dirname(videoPath) || process.cwd();
       const runId = Date.now();
@@ -167,93 +187,127 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       fs.mkdirSync(framesDir, { recursive: true });
 
       try {
-        const hasBackground = styleConfig.backgroundColor && styleConfig.backgroundColor !== 'transparent';
-        const bgColor = hasBackground ? this.hexToRgba(styleConfig.backgroundColor, styleConfig.backgroundOpacity ?? 0.75) : 'transparent';
-        const fontSizePx = Math.round((styleConfig.fontSize || 24) * scale);
-        const paddingVPx = Math.round(14 * scale);
-        const paddingHPx = Math.round(24 * scale);
-        const borderRadiusPx = Math.round(12 * scale);
+        const isTransparent = styleConfig.transparentBg === true || 
+          styleConfig.backgroundOpacity === 0 || 
+          styleConfig.backgroundColor === 'transparent' || 
+          !styleConfig.backgroundColor;
+          
+        const bgOpacity = styleConfig.backgroundOpacity !== undefined ? styleConfig.backgroundOpacity : 0.8;
+        const bgColor = isTransparent ? 'transparent' : this.hexToRgba(styleConfig.backgroundColor || '#000000', bgOpacity);
+
+        const fontSizePx = Math.round((styleConfig.fontSize || 28) * scale);
+        const paddingVPx = Math.round((isTransparent ? 4 : 6) * scale);
+        const paddingHPx = Math.round((isTransparent ? 10 : 16) * scale);
+        const borderRadiusPx = Math.round((isTransparent ? 6 : 10) * scale);
         
-        let justifyContent = 'flex-end';
-        let paddingBottom = '10%';
-        let paddingTop = '0';
-        let bodyExtraCss = '';
-        let boxExtraCss = '';
-        
+        // Exact overlay positioning matching VideoPreview.jsx
+        let containerPositionCss = `
+          left: 0;
+          right: 0;
+          bottom: ${Math.round(64 * scale)}px;
+          justify-content: center;
+        `;
+
         if (styleConfig.position === 'top') {
-          justifyContent = 'flex-start';
-          paddingTop = '10%';
-          paddingBottom = '0';
+          containerPositionCss = `
+            left: 0;
+            right: 0;
+            top: ${Math.round(48 * scale)}px;
+            justify-content: center;
+          `;
         } else if (styleConfig.position === 'center') {
-          justifyContent = 'center';
-          paddingTop = '0';
-          paddingBottom = '0';
+          containerPositionCss = `
+            left: 0;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            justify-content: center;
+          `;
         } else if (styleConfig.position === 'custom') {
-          bodyExtraCss = `position: relative;`;
-          boxExtraCss = `
-            position: absolute;
-            top: ${styleConfig.posY ?? 50}%;
+          containerPositionCss = `
+            top: ${styleConfig.posY ?? 75}%;
             left: ${styleConfig.posX ?? 50}%;
             transform: translate(-50%, -50%);
-            margin: 0 !important;
+            width: 100%;
+            justify-content: center;
           `;
         }
 
-        const shadowCSS = styleConfig.shadowColor && styleConfig.shadowColor !== 'transparent'
-          ? `0px ${Math.round((styleConfig.shadowOffset || 0) * scale)}px ${Math.round((styleConfig.shadowOffset || 0) * scale)}px ${styleConfig.shadowColor}`
+        const borderCSS = (!isTransparent && bgOpacity > 0.3) 
+          ? `${Math.max(1, Math.round(1 * scale))}px solid rgba(255,255,255,0.1)` 
+          : 'none';
+
+        const boxShadowCSS = (!isTransparent && bgOpacity > 0.4) 
+          ? `0 ${Math.round(4 * scale)}px ${Math.round(18 * scale)}px rgba(0,0,0,0.35)` 
+          : 'none';
+
+        const shadowOffset = styleConfig.shadowOffset || 0;
+        const shadowColor = styleConfig.shadowColor || 'rgba(0,0,0,0.85)';
+        const textShadowCSS = shadowOffset > 0
+          ? `${Math.round(shadowOffset * scale)}px ${Math.round(shadowOffset * scale)}px ${Math.round(shadowOffset * 1.5 * scale)}px ${shadowColor}`
           : 'none';
           
-        const strokeCSS = styleConfig.strokeColor && styleConfig.strokeWidth
-          ? `${Math.round((styleConfig.strokeWidth || 0) * scale)}px ${styleConfig.strokeColor}`
-          : '0';
+        const strokeCSS = (styleConfig.strokeWidth && styleConfig.strokeWidth > 0)
+          ? `${Math.round(styleConfig.strokeWidth * scale)}px ${styleConfig.strokeColor || '#000000'}`
+          : 'none';
 
-        const fontName = styleConfig.fontFamily || 'Arial';
+        const fontName = styleConfig.fontFamily || 'Montserrat';
         const textTransform = styleConfig.uppercase ? 'uppercase' : 'none';
+        const letterSpacingCSS = (styleConfig.letterSpacing ? Math.round(styleConfig.letterSpacing * scale) : 0) + 'px';
 
         const htmlTemplate = `
         <!DOCTYPE html>
         <html>
         <head>
-          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+          <link href="https://fonts.googleapis.com/css2?family=Anton&family=Bangers&family=Bebas+Neue&family=Inter:wght@400;600;700;800;900&family=Montserrat:wght@400;600;700;800;900&family=Oswald:wght@500;700&family=Outfit:wght@400;600;700;800;900&family=Poppins:wght@600;700;800&family=Righteous&family=Roboto:wght@400;700;900&display=swap" rel="stylesheet">
           <style>
+            * { box-sizing: border-box; }
             body {
               margin: 0;
               padding: 0;
-              width: ${width}px;
-              height: ${height}px;
+              width: ${targetW}px;
+              height: ${targetH}px;
               background-color: transparent;
-              display: flex;
-              flex-direction: column;
-              justify-content: ${justifyContent};
-              align-items: center;
-              padding-top: ${paddingTop};
-              padding-bottom: ${paddingBottom};
-              box-sizing: border-box;
               overflow: hidden;
-              ${bodyExtraCss}
+              position: relative;
+            }
+            .overlay-container {
+              position: absolute;
+              ${containerPositionCss}
+              padding: 0 ${Math.round(16 * scale)}px;
+              display: flex;
+              box-sizing: border-box;
             }
             .caption-box {
-              font-family: '${fontName}', sans-serif;
+              font-family: '${fontName}', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
               font-size: ${fontSizePx}px;
-              font-weight: 700;
+              font-weight: ${styleConfig.fontWeight || '700'};
               color: ${styleConfig.primaryColor || '#FFFFFF'};
               background-color: ${bgColor};
               padding: ${paddingVPx}px ${paddingHPx}px;
               border-radius: ${borderRadiusPx}px;
-              text-align: center;
-              max-width: 80%;
-              word-wrap: break-word;
-              white-space: pre-wrap;
-              text-shadow: ${shadowCSS};
+              border: ${borderCSS};
+              box-shadow: ${boxShadowCSS};
+              text-shadow: ${textShadowCSS};
               -webkit-text-stroke: ${strokeCSS};
+              letter-spacing: ${letterSpacingCSS};
               text-transform: ${textTransform};
-              line-height: 1.3;
-              ${boxExtraCss}
+              display: flex;
+              flex-wrap: wrap;
+              justify-content: center;
+              gap: 0.22em;
+              max-width: 92%;
+              line-height: 1.25;
+              text-align: center;
+              word-break: break-word;
+              box-sizing: border-box;
             }
           </style>
         </head>
         <body>
-          <div id="caption" class="caption-box"></div>
+          <div class="overlay-container">
+            <div id="caption" class="caption-box"></div>
+          </div>
         </body>
         </html>
         `;
@@ -266,9 +320,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         const page = await browser.newPage();
-        await page.setViewport({ width, height, deviceScaleFactor: 1 });
+        await page.setViewport({ width: targetW, height: targetH, deviceScaleFactor: 1 });
         await page.goto(`file://${htmlPath}`);
-        // Wait for fonts to load
+        // Ensure web fonts are completely loaded before taking frames
         await page.evaluateHandle('document.fonts.ready');
 
         const animation = styleConfig.animation || 'none';
@@ -281,7 +335,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           const sub = subtitles[i];
           const start = parseFloat(sub.start) || 0;
           const end = parseFloat(sub.end) || 0;
-          const duration = Math.max(0, end - start);
+          const duration = Math.max(0.1, end - start);
           
           if (start > lastEnd) {
             // Gap between subtitles
@@ -295,7 +349,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           if (animation === 'none' || words.length === 0) {
             await page.evaluate((txt) => {
               const el = document.getElementById('caption');
-              el.style.display = 'block';
+              el.style.display = 'flex';
               el.innerText = txt;
             }, text);
 
@@ -311,12 +365,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             for (let w = 0; w < words.length; w++) {
               await page.evaluate(({ wordsArray, currentIdx, animType, hColor }) => {
                 const container = document.getElementById('caption');
-                container.innerHTML = '';
-                
                 container.style.display = 'flex';
-                container.style.flexWrap = 'wrap';
-                container.style.justifyContent = 'center';
-                container.style.gap = '0.25em';
+                container.innerHTML = '';
                 
                 wordsArray.forEach((word, idx) => {
                   const span = document.createElement('span');
@@ -337,10 +387,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                       if (idx > currentIdx) visible = false;
                       break;
                     case 'scale-up':
-                      if (isCurrent) span.style.transform = 'scale(1.3)';
+                      if (isCurrent) {
+                        span.style.transform = 'scale(1.25)';
+                        span.style.color = hColor;
+                      }
                       break;
                     case 'bounce':
-                      if (isCurrent) span.style.transform = 'translateY(-15px)';
+                      if (isCurrent) {
+                        span.style.transform = 'translateY(-10px) scale(1.15)';
+                        span.style.color = hColor;
+                      }
                       break;
                   }
                   
@@ -364,15 +420,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         }
 
         // Generate full-resolution empty transparent PNG for gaps
-        // This is CRITICAL because FFmpeg concat demuxer adopts the resolution of the FIRST file it encounters.
-        // If empty.png is 1x1, it shrinks all subtitles to 1x1!
         await page.evaluate(() => {
-          document.getElementById('caption').innerText = '';
+          const el = document.getElementById('caption');
+          el.innerText = '';
+          el.style.display = 'none';
         });
         const emptyPngPath = path.join(framesDir, 'empty.png');
         await page.screenshot({ path: emptyPngPath, omitBackground: true });
 
-        // Add empty frame at the very end to clear last subtitle
+        // Add empty frame at the very end
         concatLines.push(`file 'empty.png'`);
         
         await browser.close();
@@ -380,18 +436,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         const concatPath = path.join(framesDir, 'concat.txt');
         fs.writeFileSync(concatPath, concatLines.join('\n'));
 
-        // FFmpeg overlay command
-        // [0:v] is main video, [1:v] is concat image sequence.
-        // We use fps filter to ensure image sequence plays exactly in sync, then overlay.
         const escapedConcatFile = concatPath.replace(/\\/g, '/');
-        const command = `"${ffmpegBin}" -i "${path.basename(videoPath)}" -f concat -safe 0 -i "${escapedConcatFile}" -filter_complex "[1:v]fps=30[sub];[0:v][sub]overlay=0:0" -c:v libx264 -preset ultrafast -crf 22 -c:a copy "${outputFilename}" -y`;
+        const filterStr = (srcW < targetW)
+          ? `[0:v]scale=${targetW}:${targetH}:flags=lanczos[bg];[1:v]fps=30[sub];[bg][sub]overlay=0:0`
+          : `[1:v]fps=30[sub];[0:v][sub]overlay=0:0`;
+
+        const command = `"${ffmpegBin}" -i "${path.basename(videoPath)}" -f concat -safe 0 -i "${escapedConcatFile}" -filter_complex "${filterStr}" -c:v libx264 -preset ultrafast -crf 22 -c:a aac -b:a 192k "${outputFilename}" -y`;
 
         exec(command, { cwd: tempDir, timeout: 180000 }, (error, stdout, stderr) => {
-          // Cleanup frames
+          // Cleanup frames directory
           try { fs.rmSync(framesDir, { recursive: true, force: true }); } catch (e) {}
 
           if (error || !fs.existsSync(outputVideoPath)) {
-            console.warn(`[Rendering Engine Notice] FFmpeg video rendering fallback: ${error ? error.message : 'Output file missing'}\nStderr: ${stderr}`);
+            console.warn(`[Rendering Engine Notice] FFmpeg video rendering error: ${error ? error.message : 'Output file missing'}\nStderr: ${stderr}`);
             return resolve({ videoUrl: videoPath, isFallback: true });
           }
 

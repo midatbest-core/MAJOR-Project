@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { fetchYouTubeData, extractVideoId } = require('../youtubeService');
 const YouTubeCache = require('../../models/YouTubeCache');
 const { analyzeAudienceComments } = require('../llmService');
@@ -135,15 +136,17 @@ class AnalyticsEngine {
   static async analyzeYouTubeVideo(youtubeUrl, niche = 'Programming', topic = 'Machine Learning', options = {}) {
     const videoId = extractVideoId(youtubeUrl);
 
-    // 1. Check Cache (Bypass if query string includes forceRefresh)
-    try {
-      const cached = await YouTubeCache.findOne({ videoId });
-      if (cached && cached.audienceIntelligence?.lovedAspects?.length > 0) {
-        console.log(`[Analytics Engine Cache Hit] Returning cached analysis for Video ID: ${videoId}`);
-        return { source: 'cache', data: cached };
+    // 1. Check Cache (Bypass if query string includes forceRefresh or if DB is offline)
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const cached = await YouTubeCache.findOne({ videoId }).maxTimeMS(2000);
+        if (cached && cached.audienceIntelligence?.lovedAspects?.length > 0) {
+          console.log(`[Analytics Engine Cache Hit] Returning cached analysis for Video ID: ${videoId}`);
+          return { source: 'cache', data: cached };
+        }
+      } catch (e) {
+        console.warn('[Analytics Engine Cache] Cache query bypassed');
       }
-    } catch (e) {
-      console.warn('[Analytics Engine Cache] Cache query bypassed');
     }
 
     // 2. Fetch live metadata and real top comments from YouTube API or scraper
@@ -213,9 +216,11 @@ class AnalyticsEngine {
     };
 
     // 5. Update or Save to Cache asynchronously
-    try {
-      await YouTubeCache.findOneAndUpdate({ videoId }, result, { upsert: true, new: true });
-    } catch (e) {}
+    if (mongoose.connection.readyState === 1) {
+      try {
+        await YouTubeCache.findOneAndUpdate({ videoId }, result, { upsert: true, new: true }).maxTimeMS(2000);
+      } catch (e) {}
+    }
 
     return { source: 'live', data: result };
   }

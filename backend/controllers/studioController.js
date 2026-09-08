@@ -173,7 +173,8 @@ const analyzeText = async (req, res) => {
       return sendError(res, 'Validation failed', [{ field: 'text', code: 'MISSING_TEXT', description: 'No text available to analyze' }], 400);
     }
 
-    const nlpData = await PipelineOrchestrator.engines().NlpEngine.analyzeText(targetText);
+    const groqApiKey = req.headers['x-groq-key'];
+    const nlpData = await PipelineOrchestrator.engines().NlpEngine.analyzeText(targetText, null, { groqApiKey });
 
     const analytics = {
       summary: nlpData.summary,
