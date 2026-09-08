@@ -1,0 +1,10 @@
+{
+  "venvPath": "backend",
+  "venv": ".venv",
+  "extraPaths": [
+    "backend/.venv/Lib/site-packages",
+    "backend/python-services"
+  ],
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none"
+}

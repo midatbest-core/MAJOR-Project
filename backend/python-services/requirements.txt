@@ -1,0 +1,9 @@
+openai-whisper
+spacy
+nltk
+scikit-learn
+vaderSentiment
+ffmpeg-python
+torch
+textstat
+networkx

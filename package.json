@@ -1,0 +1,14 @@
+{
+  "name": "ai-creator-dashboard",
+  "version": "1.0.0",
+  "description": "AI Creator Dashboard - Cost-Optimized Video & Content Studio",
+  "scripts": {
+    "start": "cd backend && npm start",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build"
+  },
+  "dependencies": {
+    "mongodb": "^7.5.0"
+  }
+}
